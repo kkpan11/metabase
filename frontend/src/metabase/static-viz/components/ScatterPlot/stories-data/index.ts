@@ -1,5 +1,6 @@
 import autoYAxisExcludeZeroWithGoal from "./auto-y-axis-exclude-zero-with-goal.json";
 import bubbleSize from "./bubble-size.json";
+import customYAxisRangeWithColumnScaling from "./custom-y-axis-range-with-column-scaling.json";
 import customYAxisRange from "./custom-y-axis-range.json";
 import defaultData from "./default.json";
 import goalLine from "./goal-line.json";
@@ -10,12 +11,14 @@ import multiDimensionBreakoutBubbleSize from "./multi-dimension-breakout-bubble-
 import multiDimensionBreakout from "./multi-dimension-breakout.json";
 import multiMetricSeries from "./multi-metric-series.json";
 import ordinalXScale from "./ordinal-x-scale.json";
+import pinToZero from "./pin-to-zero.json";
 import powerXScaleMultiSeries from "./power-x-scale-multi-series.json";
 import powerXScale from "./power-x-scale.json";
 import timeseriesXScale from "./timeseries-x-scale.json";
 
 export const data = {
   default: defaultData,
+  customYAxisRangeWithColumnScaling,
   multiMetricSeries,
   multiDimensionBreakout,
   bubbleSize,
@@ -30,4 +33,5 @@ export const data = {
   customYAxisRange,
   goalLine,
   autoYAxisExcludeZeroWithGoal,
+  pinToZero,
 };

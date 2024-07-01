@@ -14,6 +14,7 @@ import {
   cartesianChartCircleWithColor,
   cartesianChartCircle,
   trendLine,
+  testPairedTooltipValues,
 } from "e2e/support/helpers";
 
 const { ORDERS, ORDERS_ID, PRODUCTS, PRODUCTS_ID, PEOPLE, PEOPLE_ID } =
@@ -64,6 +65,88 @@ describe("scenarios > visualizations > line chart", () => {
       });
   });
 
+  it("should display line settings only for line/area charts", () => {
+    visitQuestionAdhoc({
+      dataset_query: testQuery,
+      display: "line",
+    });
+
+    cy.findByTestId("viz-settings-button").click();
+    openSeriesSettings("Count");
+
+    popover().within(() => {
+      cy.findByText("Style").click();
+
+      // For line chart
+      cy.findByText("Line shape").should("exist");
+      cy.findByText("Line style").should("exist");
+      cy.findByText("Line size").should("exist");
+      cy.findByText("Show dots on lines").should("exist");
+
+      // For area chart
+      cy.icon("area").click();
+      cy.findByText("Line shape").should("exist");
+      cy.findByText("Line style").should("exist");
+      cy.findByText("Line size").should("exist");
+      cy.findByText("Show dots on lines").should("exist");
+
+      // For bar chart
+      cy.icon("bar").click();
+      cy.findByText("Line shape").should("not.be.visible");
+      cy.findByText("Line style").should("not.be.visible");
+      cy.findByText("Line size").should("not.be.visible");
+      cy.findByText("Show dots on lines").should("not.be.visible");
+    });
+  });
+
+  it("should reset series settings when switching to line chart", () => {
+    visitQuestionAdhoc({
+      dataset_query: testQuery,
+      display: "area",
+    });
+
+    cy.findByTestId("viz-settings-button").click();
+    openSeriesSettings("Count");
+    cy.icon("bar").click();
+
+    cy.findByTestId("viz-type-button").click();
+
+    cy.icon("line").click();
+
+    // should be a line chart
+    cartesianChartCircleWithColor("#509EE3");
+  });
+
+  it("should reset stacking settings when switching to line chart (metabase#43538)", () => {
+    visitQuestionAdhoc({
+      dataset_query: {
+        database: SAMPLE_DB_ID,
+        query: {
+          "source-table": PRODUCTS_ID,
+          aggregation: [["avg", ["field", PRODUCTS.PRICE, null]]],
+          breakout: [
+            ["field", PRODUCTS.CREATED_AT, { "temporal-unit": "year" }],
+            ["field", PRODUCTS.CATEGORY, null],
+          ],
+        },
+        type: "query",
+      },
+      display: "bar",
+      visualization_settings: {
+        "stackable.stack_type": "normalized",
+      },
+    });
+
+    cy.findByTestId("viz-type-button").click();
+
+    cy.icon("line").click();
+
+    cartesianChartCircleWithColor("#A989C5");
+
+    // Y-axis scale should not be normalized
+    echartsContainer().findByText("100%").should("not.exist");
+  });
+
   it("should be able to format data point values style independently on multi-series chart (metabase#13095)", () => {
     visitQuestionAdhoc({
       dataset_query: {
@@ -94,6 +177,43 @@ describe("scenarios > visualizations > line chart", () => {
     });
 
     echartsContainer().get("text").contains("39.75%");
+  });
+
+  it("should let unpin y-axis from zero", () => {
+    visitQuestionAdhoc({
+      dataset_query: {
+        type: "query",
+        query: {
+          "source-table": ORDERS_ID,
+          aggregation: [["avg", ["field", ORDERS.TOTAL, null]]],
+          breakout: [["field", ORDERS.CREATED_AT, { "temporal-unit": "year" }]],
+        },
+        database: SAMPLE_DB_ID,
+      },
+      display: "line",
+      visualization_settings: {
+        "graph.dimensions": ["CREATED_AT"],
+        "graph.metrics": ["avg"],
+      },
+    });
+
+    // The chart is pinned to zero by default: 0 tick should exist
+    echartsContainer().findByText("0");
+
+    cy.findByTestId("viz-settings-button").click();
+    cy.findByTestId("chartsettings-sidebar").within(() => {
+      cy.findByText("Axes").click();
+      cy.findByText("Unpin from zero").click();
+    });
+
+    // Ensure unpinned chart does not have 0 tick
+    echartsContainer().findByText("0").should("not.exist");
+
+    cy.findByTestId("chartsettings-sidebar")
+      .findByText("Unpin from zero")
+      .click();
+
+    echartsContainer().findByText("0");
   });
 
   it("should display an error message when there are more series than the chart supports", () => {
@@ -537,7 +657,7 @@ describe("scenarios > visualizations > line chart", () => {
       series.forEach(serie => {
         const [old_name, new_name] = serie;
 
-        cy.findByDisplayValue(old_name).clear().type(new_name);
+        cy.findByDisplayValue(old_name).clear().type(new_name).blur();
       });
 
       modal()
@@ -624,6 +744,11 @@ describe("scenarios > visualizations > line chart", () => {
       display: "line",
     });
 
+    queryBuilderMain().within(() => {
+      echartsContainer().findByText("Quantity").should("exist");
+    });
+    cy.wait(100); // wait to avoid grabbing the svg before the chart redraws
+
     cy.findByTestId("query-visualization-root")
       .trigger("mousedown", 180, 200)
       .trigger("mousemove", 180, 200)
@@ -642,10 +767,6 @@ describe("scenarios > visualizations > line chart", () => {
     });
   });
 });
-
-function testPairedTooltipValues(val1, val2) {
-  cy.contains(val1).closest("td").siblings("td").findByText(val2);
-}
 
 function showTooltipForFirstCircleInSeries(seriesColor) {
   cartesianChartCircleWithColor(seriesColor).eq(0).trigger("mousemove");

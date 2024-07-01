@@ -1,17 +1,31 @@
+import dayjs from "dayjs";
 import { memoize } from "underscore";
+import type { SchemaObjectDescription } from "yup/lib/schema";
 
 import {
   Cron,
-  weekdays,
   optionNameTranslations,
+  weekdays,
 } from "metabase/components/Schedule/constants";
 import { isNullOrUndefined } from "metabase/lib/types";
+import { PLUGIN_CACHING } from "metabase/plugins";
 import type {
-  ScheduleSettings,
-  ScheduleType,
+  AdaptiveStrategy,
+  CacheConfig,
+  CacheStrategy,
+  CacheStrategyType,
+  CacheableModel,
   ScheduleDayType,
   ScheduleFrameType,
+  ScheduleSettings,
+  ScheduleType,
 } from "metabase-types/api";
+
+import { defaultMinDurationMs, rootId } from "./constants/simple";
+import type { StrategyLabel } from "./types";
+
+const AM = 0;
+const PM = 1;
 
 const dayToCron = (day: ScheduleSettings["schedule_day"]) => {
   const index = weekdays.findIndex(o => o.value === day);
@@ -144,27 +158,38 @@ const defaultSchedule: ScheduleSettings = {
 };
 export const defaultCron = scheduleSettingsToCron(defaultSchedule);
 
+const isValidAmPm = (amPm: number) => amPm === AM || amPm === PM;
+
 export const hourToTwelveHourFormat = (hour: number) => hour % 12 || 12;
-export const hourTo24HourFormat = (hour: number, amPm: number) =>
-  hour + amPm * 12;
+export const hourTo24HourFormat = (hour: number, amPm: number): number => {
+  if (!isValidAmPm(amPm)) {
+    amPm = AM;
+  }
+  const amPmString = amPm === AM ? "AM" : "PM";
+  const convertedString = dayjs(`${hour} ${amPmString}`, "h A").format("HH");
+  return parseInt(convertedString);
+};
 
 type ErrorWithMessage = { data: { message: string } };
 export const isErrorWithMessage = (error: unknown): error is ErrorWithMessage =>
   typeof error === "object" &&
   error !== null &&
   "data" in error &&
+  typeof (error as { data: any }).data === "object" &&
   "message" in (error as { data: any }).data &&
   typeof (error as { data: { message: any } }).data.message === "string";
 
 const delay = (milliseconds: number) =>
   new Promise(resolve => setTimeout(resolve, milliseconds));
 
-/** To prevent UI jumpiness, ensure a minimum delay before continuing. An example of jumpiness: clicking a save button results in displaying a loading spinner for 10 ms and then a success message */
+/** To prevent UI jumpiness, ensure a minimum delay before continuing.
+ * An example of jumpiness: clicking a save button results in
+ * displaying a loading spinner for 10 ms and then a success message */
 export const resolveSmoothly = async (
-  promise: Promise<any>,
+  promises: Promise<any>[],
   timeout: number = 300,
 ) => {
-  return await Promise.all([delay(timeout), promise]);
+  return await Promise.all([delay(timeout), ...promises]);
 };
 
 export const getFrequencyFromCron = (cron: string) => {
@@ -173,3 +198,81 @@ export const getFrequencyFromCron = (cron: string) => {
     ? ""
     : optionNameTranslations[scheduleType];
 };
+
+export const isValidStrategyName = (
+  strategy: string,
+): strategy is CacheStrategyType => {
+  const { strategies } = PLUGIN_CACHING;
+  const validStrategyNames = new Set(Object.keys(strategies));
+  return validStrategyNames.has(strategy);
+};
+
+export const getLabelString = (label: StrategyLabel, model?: CacheableModel) =>
+  typeof label === "string" ? label : label(model);
+
+export const getShortStrategyLabel = (
+  strategy?: CacheStrategy,
+  model?: CacheableModel,
+) => {
+  const { strategies } = PLUGIN_CACHING;
+  if (!strategy) {
+    return null;
+  }
+  const type = strategies[strategy.type];
+  const mainLabel = getLabelString(type.shortLabel ?? type.label, model);
+  if (strategy.type === "schedule") {
+    const frequency = getFrequencyFromCron(strategy.schedule);
+    return `${mainLabel}: ${frequency}`;
+  } else {
+    return mainLabel;
+  }
+};
+
+export const getFieldsForStrategyType = (strategyType: CacheStrategyType) => {
+  const { strategies } = PLUGIN_CACHING;
+  const strategy = strategies[strategyType];
+  const validationSchemaDescription =
+    strategy.validateWith.describe() as SchemaObjectDescription;
+  const fieldRecord = validationSchemaDescription.fields;
+  const fields = Object.keys(fieldRecord);
+  return fields;
+};
+
+export const translateConfig = (
+  config: CacheConfig,
+  direction: "fromAPI" | "toAPI",
+): CacheConfig => {
+  const translated: CacheConfig = { ...config };
+
+  // If strategy type is unsupported, use a fallback
+  if (!isValidStrategyName(translated.strategy.type)) {
+    translated.strategy.type =
+      translated.model_id === rootId ? "nocache" : "inherit";
+  }
+
+  if (translated.strategy.type === "ttl") {
+    if (direction === "fromAPI") {
+      translated.strategy = populateMinDurationSeconds(translated.strategy);
+    } else {
+      translated.strategy.min_duration_ms =
+        translated.strategy.min_duration_seconds === undefined
+          ? defaultMinDurationMs
+          : translated.strategy.min_duration_seconds * 1000;
+      delete translated.strategy.min_duration_seconds;
+    }
+  }
+  return translated;
+};
+
+export const populateMinDurationSeconds = (strategy: AdaptiveStrategy) => ({
+  ...strategy,
+  min_duration_seconds: Math.ceil(strategy.min_duration_ms / 1000),
+});
+
+/** Translate a config from the API into a format the frontend can use */
+export const translateConfigFromAPI = (config: CacheConfig): CacheConfig =>
+  translateConfig(config, "fromAPI");
+
+/** Translate a config from the frontend's format into the API's preferred format */
+export const translateConfigToAPI = (config: CacheConfig): CacheConfig =>
+  translateConfig(config, "toAPI");

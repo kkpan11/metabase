@@ -1,4 +1,4 @@
-import type { EChartsOption } from "echarts";
+import type { EChartsCoreOption } from "echarts/core";
 import { t } from "ttag";
 
 import { isNotNull } from "metabase/lib/types";
@@ -77,11 +77,11 @@ export const getHoveredSeriesDataKey = (
   return seriesModels[seriesIndex]?.dataKey ?? null;
 };
 
-export const getHoveredEChartsSeriesIndex = (
+export const getHoveredEChartsSeriesDataKeyAndIndex = (
   seriesModels: SeriesModel[],
-  option: EChartsOption,
+  option: EChartsCoreOption,
   hovered: HoveredObject | undefined,
-): number | null => {
+) => {
   const hoveredSeriesDataKey = getHoveredSeriesDataKey(seriesModels, hovered);
 
   const seriesOptions = Array.isArray(option?.series)
@@ -90,9 +90,9 @@ export const getHoveredEChartsSeriesIndex = (
 
   // ECharts series contain goal line, trend lines, and timeline events so the series index
   // is different from one in chartModel.seriesModels
-  const eChartsSeriesIndex = seriesOptions.findIndex(
+  const hoveredEChartsSeriesIndex = seriesOptions.findIndex(
     series => series.id === hoveredSeriesDataKey,
   );
 
-  return eChartsSeriesIndex;
+  return { hoveredSeriesDataKey, hoveredEChartsSeriesIndex };
 };

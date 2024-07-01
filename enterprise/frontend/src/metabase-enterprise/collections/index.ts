@@ -21,6 +21,7 @@ import {
   isRegularCollection,
   getInstanceAnalyticsCustomCollection,
   getIcon,
+  filterOutItemsFromInstanceAnalytics,
 } from "./utils";
 
 if (hasPremiumFeature("official_collections")) {
@@ -29,6 +30,8 @@ if (hasPremiumFeature("official_collections")) {
   PLUGIN_COLLECTIONS.REGULAR_COLLECTION = REGULAR_COLLECTION;
 
   PLUGIN_COLLECTIONS.AUTHORITY_LEVEL = AUTHORITY_LEVELS;
+
+  PLUGIN_COLLECTIONS.getIcon = getIcon;
 
   PLUGIN_COLLECTIONS.getAuthorityLevelMenuItems = (
     collection: Collection,
@@ -59,6 +62,9 @@ if (hasPremiumFeature("official_collections")) {
     }
   };
 
+  PLUGIN_COLLECTIONS.filterOutItemsFromInstanceAnalytics =
+    filterOutItemsFromInstanceAnalytics;
+
   PLUGIN_COLLECTION_COMPONENTS.FormCollectionAuthorityLevelPicker =
     FormCollectionAuthorityLevel;
 
@@ -77,5 +83,4 @@ if (hasPremiumFeature("audit_app")) {
     CUSTOM_INSTANCE_ANALYTICS_COLLECTION_ENTITY_ID;
 
   PLUGIN_COLLECTIONS.INSTANCE_ANALYTICS_ADMIN_READONLY_MESSAGE = t`This instance analytics collection is read-only for admin users`;
-  PLUGIN_COLLECTIONS.getIcon = getIcon;
 }

@@ -112,6 +112,7 @@ export function ColumnInput({
       >
         <Popover.Target>
           <Button
+            data-testid="column-input"
             ref={button}
             onMouseDownCapture={handleButtonClick}
             onKeyDown={handleKeyDown}
@@ -125,7 +126,9 @@ export function ColumnInput({
             {text}
           </Button>
         </Popover.Target>
-        <Popover.Dropdown>{dropdown}</Popover.Dropdown>
+        <Popover.Dropdown setupSequencedCloseHandler={open}>
+          {dropdown}
+        </Popover.Dropdown>
       </Popover>
     </Input.Wrapper>
   );

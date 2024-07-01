@@ -83,7 +83,7 @@
                :average_execution_time nil
                :context                nil
                :running_time           int?
-               :cached                 false}
+               :cached                 nil}
               (process-userland-query query))
           "Result should have query execution info")
       (is (=? {:hash         "58af781ea2ba252ce3131462bdc7c54bc57538ed965d55beec62928ce8b32635"
@@ -178,12 +178,13 @@
   (testing "execute an userland query will capture field usages"
     (mt/with-model-cleanup [:model/FieldUsage]
       (mt/with-temp [:model/Field {field-id :id} {:table_id (mt/id :products)
-                                                  :name     "very_interesting_field"}
+                                                  :name     "very_interesting_field"
+                                                  :base_type :type/Integer}
                      :model/Card card            {:dataset_query (mt/mbql-query products
                                                                                 {:filter [:> [:field field-id nil] 1]})}]
-        (binding [process-userland-query/*save-execution-metadata-async* false
-                  qp.pipeline/*execute*                                  (fn [_driver _query respond]
-                                                                           (respond {} []))]
+        (binding [qp.util/*execute-async?* false
+                  qp.pipeline/*execute*    (fn [_driver _query respond]
+                                             (respond {} []))]
           (mt/user-http-request :crowberto :post 202 (format "/card/%d/query" (:id card)))
           (is (=? [{:filter_op                  :>
                     :breakout_temporal_unit     nil

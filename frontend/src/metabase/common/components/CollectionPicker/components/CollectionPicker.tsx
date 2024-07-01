@@ -19,7 +19,6 @@ import {
 } from "../../EntityPicker";
 import type { CollectionPickerItem, CollectionPickerOptions } from "../types";
 import {
-  generateKey,
   getCollectionIdPath,
   getParentCollectionId,
   getPathLevelForItem,
@@ -159,7 +158,7 @@ export const CollectionPickerInner = (
           idPath: getCollectionIdPath(
             {
               id: currentCollection.id,
-              location: currentCollection.location,
+              location: currentCollection.effective_location,
               is_personal: currentCollection.is_personal,
             },
             userPersonalCollectionId,
@@ -193,7 +192,6 @@ export const CollectionPickerInner = (
       isFolder={isFolder}
       shouldDisableItem={shouldDisableItem}
       options={options}
-      generateKey={generateKey}
       onFolderSelect={onFolderSelect}
       onItemSelect={handleItemSelect}
       path={path}

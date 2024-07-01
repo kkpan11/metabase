@@ -1,6 +1,4 @@
-import type { PayloadAction } from "@reduxjs/toolkit";
-import { createReducer } from "@reduxjs/toolkit";
-import { createAction } from "redux-actions";
+import { createReducer, createAction } from "@reduxjs/toolkit";
 
 import type { SdkPluginsConfig } from "embedding-sdk/lib/plugins";
 import type {
@@ -14,10 +12,14 @@ import { createAsyncThunk } from "metabase/lib/redux";
 import { getSessionTokenState } from "./selectors";
 
 const SET_LOGIN_STATUS = "sdk/SET_LOGIN_STATUS";
+const SET_METABASE_CLIENT_URL = "sdk/SET_METABASE_CLIENT_URL";
 const SET_LOADER_COMPONENT = "sdk/SET_LOADER_COMPONENT";
 const SET_ERROR_COMPONENT = "sdk/SET_ERROR_COMPONENT";
 
 export const setLoginStatus = createAction<LoginStatus>(SET_LOGIN_STATUS);
+export const setMetabaseClientUrl = createAction<string>(
+  SET_METABASE_CLIENT_URL,
+);
 export const setLoaderComponent = createAction<null | (() => JSX.Element)>(
   SET_LOADER_COMPONENT,
 );
@@ -59,6 +61,7 @@ const SET_PLUGINS = "sdk/SET_PLUGINS";
 export const setPlugins = createAction<SdkPluginsConfig | null>(SET_PLUGINS);
 
 const initialState: SdkState = {
+  metabaseInstanceUrl: "",
   token: {
     token: null,
     loading: false,
@@ -70,69 +73,55 @@ const initialState: SdkState = {
   errorComponent: null,
 };
 
-export const sdk = createReducer(initialState, {
-  [refreshTokenAsync.pending.type]: state => {
-    return {
-      ...state,
-      token: {
-        ...state.token,
-        loading: true,
-      },
-    };
-  },
-  [refreshTokenAsync.fulfilled.type]: (state, action) => {
-    return {
-      ...state,
-      token: {
-        ...state.token,
-        token: action.payload,
-        error: null,
-        loading: false,
-      },
-    };
-  },
-  [refreshTokenAsync.rejected.type]: (state, action) => {
-    return {
-      ...state,
-      isLoggedIn: false,
-      token: {
-        ...state.token,
-        token: null,
-        error: action.error,
-        loading: false,
-      },
-    };
-  },
-  [SET_LOGIN_STATUS]: (state, action: PayloadAction<LoginStatus>) => {
-    return {
-      ...state,
-      loginStatus: action.payload,
-    };
-  },
-  [SET_PLUGINS]: (state, action: PayloadAction<SdkPluginsConfig | null>) => {
-    return {
-      ...state,
-      plugins: action.payload,
-    };
-  },
-  [SET_LOADER_COMPONENT]: (
-    state,
-    action: PayloadAction<null | (() => JSX.Element)>,
-  ) => {
-    return {
-      ...state,
-      loaderComponent: action.payload,
-    };
-  },
-  [SET_ERROR_COMPONENT]: (
-    state,
-    action: PayloadAction<
-      null | (({ message }: { message: string }) => JSX.Element)
-    >,
-  ) => {
-    return {
-      ...state,
-      errorComponent: action.payload,
-    };
-  },
+export const sdk = createReducer(initialState, builder => {
+  builder.addCase(refreshTokenAsync.pending, state => ({
+    ...state,
+    token: { ...state.token, loading: true },
+  }));
+
+  builder.addCase(refreshTokenAsync.fulfilled, (state, action) => ({
+    ...state,
+    token: {
+      ...state.token,
+      token: action.payload,
+      error: null,
+      loading: false,
+    },
+  }));
+
+  builder.addCase(refreshTokenAsync.rejected, (state, action) => ({
+    ...state,
+    isLoggedIn: false,
+    token: {
+      ...state.token,
+      token: null,
+      error: action.error,
+      loading: false,
+    },
+  }));
+
+  builder.addCase(setLoginStatus, (state, action) => ({
+    ...state,
+    loginStatus: action.payload,
+  }));
+
+  builder.addCase(setLoaderComponent, (state, action) => ({
+    ...state,
+    loaderComponent: action.payload,
+  }));
+
+  builder.addCase(setPlugins, (state, action) => ({
+    ...state,
+    plugins: action.payload,
+  }));
+
+  builder.addCase(setErrorComponent, (state, action) => ({
+    ...state,
+    errorComponent: action.payload,
+  }));
+
+  builder.addCase(setMetabaseClientUrl, (state, action) => ({
+    ...state,
+    metabaseInstanceUrl: action.payload,
+  }));
 });

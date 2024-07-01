@@ -1,4 +1,4 @@
-import type { EChartsType } from "echarts";
+import type { EChartsType } from "echarts/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ChartRenderingErrorBoundary } from "metabase/visualizations/components/ChartRenderingErrorBoundary";
@@ -26,6 +26,7 @@ function _CartesianChart(props: VisualizationProps) {
     rawSeries,
     settings: originalSettings,
     card,
+    href,
     gridSize,
     width,
     showTitle,
@@ -51,7 +52,7 @@ function _CartesianChart(props: VisualizationProps) {
     height: chartSize.height,
     settings,
   });
-  useChartDebug({ isQueryBuilder, rawSeries, option });
+  useChartDebug({ isQueryBuilder, rawSeries, option, chartModel });
 
   const chartRef = useRef<EChartsType>();
 
@@ -95,6 +96,7 @@ function _CartesianChart(props: VisualizationProps) {
           description={description}
           icon={headerIcon}
           actionButtons={actionButtons}
+          href={canSelectTitle ? href : undefined}
           onSelectTitle={canSelectTitle ? onOpenQuestion : undefined}
           width={width}
         />
@@ -102,8 +104,7 @@ function _CartesianChart(props: VisualizationProps) {
       <CartesianChartLegendLayout
         isReversed={settings["legend.is_reversed"]}
         hasLegend={hasLegend}
-        labels={legendItems.map(item => item.name)}
-        colors={legendItems.map(item => item.color)}
+        items={legendItems}
         actionButtons={!hasTitle ? actionButtons : undefined}
         hovered={hovered}
         isFullscreen={isFullscreen}
@@ -113,8 +114,8 @@ function _CartesianChart(props: VisualizationProps) {
         onRemoveSeries={onRemoveSeries}
         onHoverChange={onHoverChange}
       >
+        {/**@ts-expect-error emotion does not properly provide prop types due */}
         <CartesianChartRenderer
-          // @ts-expect-error emotion does not properly provide prop types due
           // to it not working with the `WrappedComponent` class defined in
           // ExplicitSize
           option={option}

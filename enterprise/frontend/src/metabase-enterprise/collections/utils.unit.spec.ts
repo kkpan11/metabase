@@ -1,6 +1,6 @@
 import { createMockCollection } from "metabase-types/api/mocks";
 
-import { getCollectionType, isRegularCollection, getIcon } from "./utils";
+import { getCollectionType, getIcon, isRegularCollection } from "./utils";
 
 describe("Collections plugin utils", () => {
   const COLLECTION = {
@@ -76,10 +76,19 @@ describe("Collections plugin utils", () => {
         ).toEqual({ name: "badge", color: "saturated-yellow" });
       });
 
-      it("should return the correct icon for an official dataset", () => {
+      it("official collection in search", () => {
+        const collection = {
+          id: 101,
+          collection_authority_level: "official",
+          model: "collection" as const,
+        };
+        expect(getIcon(collection).name).toBe("badge");
+      });
+
+      it("should return the correct icon for an official model", () => {
         expect(
-          getIcon({ model: "dataset", authority_level: "official" }),
-        ).toEqual({ name: "model_with_badge", color: "saturated-yellow" });
+          getIcon({ model: "dataset", moderated_status: "verified" }),
+        ).toEqual({ name: "model_with_badge" });
       });
     });
   });

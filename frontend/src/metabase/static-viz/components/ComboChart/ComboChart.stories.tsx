@@ -3,6 +3,7 @@ import type { ComponentStory } from "@storybook/react";
 import { color } from "metabase/lib/colors";
 import { formatStaticValue } from "metabase/static-viz/lib/format";
 import { measureTextWidth } from "metabase/static-viz/lib/text";
+import { DEFAULT_VISUALIZATION_THEME } from "metabase/visualizations/shared/utils/theme";
 import type { RenderingContext } from "metabase/visualizations/types";
 
 import { ComboChart } from "./ComboChart";
@@ -27,6 +28,7 @@ const renderingContext: RenderingContext = {
   measureText: (text, style) =>
     measureTextWidth(text, Number(style.size), Number(style.weight)),
   fontFamily: "Lato",
+  theme: DEFAULT_VISUALIZATION_THEME,
 };
 
 export const LineLinearXScale = Template.bind({});
@@ -64,6 +66,20 @@ LineLogYScale.args = {
   renderingContext,
 };
 
+export const GoalLineLogYScale = Template.bind({});
+GoalLineLogYScale.args = {
+  rawSeries: data.goalLineLogYScale as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const GoalLinePowYScale = Template.bind({});
+GoalLinePowYScale.args = {
+  rawSeries: data.goalLinePowYScale as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
 export const LineLogYScaleNegative = Template.bind({});
 LineLogYScaleNegative.args = {
   rawSeries: data.lineLogYScaleNegative as any,
@@ -95,6 +111,13 @@ LineShowDotsOff.args = {
 export const LineCustomYAxisRangeEqualsExtents = Template.bind({});
 LineCustomYAxisRangeEqualsExtents.args = {
   rawSeries: data.lineCustomYAxisRangeEqualsExtents as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const CustomYAxisRangeWithColumnScaling = Template.bind({});
+CustomYAxisRangeWithColumnScaling.args = {
+  rawSeries: data.customYAxisRangeWithColumnScaling as any,
   dashcardSettings: {},
   renderingContext,
 };
@@ -200,6 +223,20 @@ BarStackedPowYAxis.args = {
 export const BarStackedPowYAxisNegatives = Template.bind({});
 BarStackedPowYAxisNegatives.args = {
   rawSeries: data.barStackedPowYAxisNegatives as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const YAxisCompactWithoutDataLabels = Template.bind({});
+YAxisCompactWithoutDataLabels.args = {
+  rawSeries: data.yAxisCompactWithoutDataLabels as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const BarFormattingFull = Template.bind({});
+BarFormattingFull.args = {
+  rawSeries: data.barFormattingFull as any,
   dashcardSettings: {},
   renderingContext,
 };
@@ -408,13 +445,6 @@ ComboHistogram.args = {
   renderingContext,
 };
 
-export const ComboBarsBecomeStackedInStaticViz38827 = Template.bind({});
-ComboBarsBecomeStackedInStaticViz38827.args = {
-  rawSeries: data.comboBarsBecomeStackedInStaticViz38827 as any,
-  dashcardSettings: {},
-  renderingContext,
-};
-
 export const CombinedBarTimeSeriesDifferentGranularityWithBreakout =
   Template.bind({});
 CombinedBarTimeSeriesDifferentGranularityWithBreakout.args = {
@@ -451,6 +481,12 @@ CompactXAxisDoesNotWork38917.args = {
   renderingContext,
 };
 
+export const DataLabelsUnderTrendGoalLines41280 = Template.bind({});
+DataLabelsUnderTrendGoalLines41280.args = {
+  rawSeries: data.dataLabelsUnderTrendGoalLines41280 as any,
+  dashcardSettings: {},
+  renderingContext,
+};
 export const TicksNativeWeekWithGapShortRange = Template.bind({});
 TicksNativeWeekWithGapShortRange.args = {
   rawSeries: data.ticksNativeWeekWithGapShortRange as any,
@@ -496,13 +532,6 @@ NumberOfInsightsError39608.args = {
 export const AreaStackInterpolateMissingValues = Template.bind({});
 AreaStackInterpolateMissingValues.args = {
   rawSeries: data.areaStackInterpolateMissingValues as any,
-  dashcardSettings: {},
-  renderingContext,
-};
-
-export const BarStackDisplayOverridesSeriesDisplays = Template.bind({});
-BarStackDisplayOverridesSeriesDisplays.args = {
-  rawSeries: data.barStackDisplayOverridesSeriesDisplays as any,
   dashcardSettings: {},
   renderingContext,
 };
@@ -604,9 +633,191 @@ HistogramTicks45Degrees.args = {
   dashcardSettings: {},
   renderingContext,
 };
+
 export const HistogramTicks90Degrees = Template.bind({});
 HistogramTicks90Degrees.args = {
   rawSeries: data.histogramTicks90Degrees as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const LineUnpinFromZero = Template.bind({});
+LineUnpinFromZero.args = {
+  rawSeries: data.lineUnpinFromZero as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const LineSettings = Template.bind({});
+LineSettings.args = {
+  rawSeries: data.lineSettings as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const LineReplaceMissingValuesZero = Template.bind({});
+LineReplaceMissingValuesZero.args = {
+  rawSeries: data.lineReplaceMissingValuesZero as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const LineChartBrokenDimensionsMetricsSettings = Template.bind({});
+LineChartBrokenDimensionsMetricsSettings.args = {
+  rawSeries: data.lineChartBrokenDimensionsMetricsSettings as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const ComboStackedBarsAreasNormalized = Template.bind({});
+ComboStackedBarsAreasNormalized.args = {
+  rawSeries: data.comboStackedBarsAreasNormalized as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const ComboStackedBarsAreas = Template.bind({});
+ComboStackedBarsAreas.args = {
+  rawSeries: data.comboStackedBarsAreas as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const TwoBarsTwoAreasOneLineLinear = Template.bind({});
+TwoBarsTwoAreasOneLineLinear.args = {
+  rawSeries: data.twoBarsTwoAreasOneLineLinear as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const TwoBarsTwoAreasOneLinePower = Template.bind({});
+TwoBarsTwoAreasOneLinePower.args = {
+  rawSeries: data.twoBarsTwoAreasOneLinePower as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const TwoBarsTwoAreasOneLineLog = Template.bind({});
+TwoBarsTwoAreasOneLineLog.args = {
+  rawSeries: data.twoBarsTwoAreasOneLineLog as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const BarCorrectWidthWhenTwoYAxes = Template.bind({});
+BarCorrectWidthWhenTwoYAxes.args = {
+  rawSeries: data.barCorrectWidthWhenTwoYAxes as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const BarDataLabelsNegatives = Template.bind({});
+BarDataLabelsNegatives.args = {
+  rawSeries: data.barDataLabelsNegatives as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const BarStackedNormalizedSeriesLabels = Template.bind({});
+BarStackedNormalizedSeriesLabels.args = {
+  rawSeries: data.barStackedNormalizedSeriesLabels as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const BarStackedSeriesLabelsAndTotals = Template.bind({});
+BarStackedSeriesLabelsAndTotals.args = {
+  rawSeries: data.barStackedSeriesLabelsAndTotals as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const BarStackedSeriesLabelsNoTotals = Template.bind({});
+BarStackedSeriesLabelsNoTotals.args = {
+  rawSeries: data.barStackedSeriesLabelsNoTotals as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const BarStackedSeriesLabelsRotated = Template.bind({});
+BarStackedSeriesLabelsRotated.args = {
+  rawSeries: data.barStackedSeriesLabelsRotated as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const BarStackedSeriesLabelsAutoCompactness = Template.bind({});
+BarStackedSeriesLabelsAutoCompactness.args = {
+  rawSeries: data.barStackedSeriesLabelsAutoCompactness as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const BarStackedSeriesLabelsAndTotalsOrdinal = Template.bind({});
+BarStackedSeriesLabelsAndTotalsOrdinal.args = {
+  rawSeries: data.barStackedSeriesLabelsAndTotalsOrdinal as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const BarStackedSeriesLabelsNormalizedAutoCompactness = Template.bind(
+  {},
+);
+BarStackedSeriesLabelsNormalizedAutoCompactness.args = {
+  rawSeries: data.barStackedSeriesLabelsNormalizedAutoCompactness as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const BarStackedLabelsNullVsZero = Template.bind({});
+BarStackedLabelsNullVsZero.args = {
+  rawSeries: data.barStackedLabelsNullVsZero as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const BarMinHeightLimit = Template.bind({});
+BarMinHeightLimit.args = {
+  rawSeries: data.barMinHeightLimit as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const ComboDataLabelsAutoCompactnessPropagatesFromLine = Template.bind(
+  {},
+);
+ComboDataLabelsAutoCompactnessPropagatesFromLine.args = {
+  rawSeries: data.comboDataLabelsAutoCompactnessPropagatesFromLine as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const ComboDataLabelsAutoCompactnessPropagatesFromTotals = Template.bind(
+  {},
+);
+ComboDataLabelsAutoCompactnessPropagatesFromTotals.args = {
+  rawSeries: data.comboDataLabelsAutoCompactnessPropagatesFromTotals as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const AreaChartSteppedNullsInterpolated = Template.bind({});
+AreaChartSteppedNullsInterpolated.args = {
+  rawSeries: data.areaChartSteppedNullsInterpolated as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const AreaChartSteppedNullsSkipped = Template.bind({});
+AreaChartSteppedNullsSkipped.args = {
+  rawSeries: data.areaChartSteppedNullsSkipped as any,
+  dashcardSettings: {},
+  renderingContext,
+};
+
+export const SafariNonIanaTimezoneRepro44128 = Template.bind({});
+SafariNonIanaTimezoneRepro44128.args = {
+  rawSeries: data.safariNonIanaTimezoneRepro44128 as any,
   dashcardSettings: {},
   renderingContext,
 };

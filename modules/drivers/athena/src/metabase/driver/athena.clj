@@ -32,10 +32,12 @@
 ;;; |                                          metabase.driver method impls                                          |
 ;;; +----------------------------------------------------------------------------------------------------------------+
 
-(doseq [[feature supported?] {:datetime-diff             true
-                              :foreign-keys              true
-                              :nested-fields             false
-                              :test/jvm-timezone-setting false}]
+(doseq [[feature supported?] {:datetime-diff                 true
+                              :foreign-keys                  true
+                              :nested-fields                 false
+                              :connection/multiple-databases true
+                              :metadata/key-constraints      false
+                              :test/jvm-timezone-setting     false}]
   (defmethod driver/database-supports? [:athena feature] [_driver _feature _db] supported?))
 
 ;;; +----------------------------------------------------------------------------------------------------------------+
@@ -348,11 +350,14 @@
 
 (defn describe-table-fields
   "Returns a set of column metadata for `schema` and `table-name` using `metadata`. "
-  [^DatabaseMetaData metadata database driver {^String schema :schema, ^String table-name :name}, & [^String db-name-or-nil]]
+  [^DatabaseMetaData metadata database driver {^String schema :schema, ^String table-name :name} catalog]
   (try
-    (with-open [rs (.getColumns metadata db-name-or-nil schema table-name nil)]
+    (with-open [rs (.getColumns metadata catalog schema table-name nil)]
       (let [columns (jdbc/metadata-result rs)]
-        (if (table-has-nested-fields? columns)
+        (if (or (table-has-nested-fields? columns)
+                ; If `.getColumns` returns an empty result, try to use DESCRIBE, which is slower
+                ; but doesn't suffer from the bug in the JDBC driver as metabase#43980
+                (empty? columns))
           (describe-table-fields-with-nested-fields database schema table-name)
           (describe-table-fields-without-nested-fields driver columns))))
     (catch Throwable e

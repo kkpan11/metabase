@@ -4,7 +4,6 @@
    [hiccup.core :refer [h]]
    [medley.core :as m]
    [metabase.formatter :as formatter]
-   [metabase.formatter.datetime :as datetime]
    [metabase.models.timeline-event :as timeline-event]
    [metabase.public-settings :as public-settings]
    [metabase.pulse.render.color :as color]
@@ -12,7 +11,6 @@
    [metabase.pulse.render.js-svg :as js-svg]
    [metabase.pulse.render.style :as style]
    [metabase.pulse.render.table :as table]
-   [metabase.pulse.util :as pu]
    [metabase.query-processor.streaming :as qp.streaming]
    [metabase.shared.models.visualization-settings :as mb.viz]
    [metabase.types :as types]
@@ -71,7 +69,7 @@
   [timezone-id :- [:maybe :string] value col visualization-settings]
   (cond
     (types/temporal-field? col)
-    (datetime/format-temporal-str timezone-id value col)
+    (formatter/format-temporal-str timezone-id value col)
 
     (number? value)
     (formatter/format-number value col visualization-settings)
@@ -422,8 +420,8 @@
                  {:percentage (percentages (first row))
                   :color      (legend-colors (first row))
                   :label      (if (and (contains? label-viz-settings :date_style)
-                                       (datetime/temporal-string? label))
-                                (datetime/format-temporal-str
+                                       (formatter/temporal-string? label))
+                                (formatter/format-temporal-str
                                  timezone-id
                                  (first row)
                                  (x-axis-rowfn cols)
@@ -529,33 +527,35 @@
       (h value)]
      :render/text (str value)}))
 
+(defn- raise-data-one-level
+  "Raise the :data key inside the given result map up to the top level. This is the expected shape of `add-dashcard-timeline`."
+  [{:keys [result] :as m}]
+  (-> m
+      (assoc :data (:data result))
+      (dissoc :result)))
+
 ;; the `:javascript_visualization` render method
 ;; is and will continue to handle more and more 'isomorphic' chart types.
 ;; Isomorphic in this context just means the frontend Code is mostly shared between the app and the static-viz
 ;; As of 2024-03-21, isomorphic chart types include: line, area, bar (LAB), and trend charts
 ;; Because this effort began with LAB charts, this method is written to handle multi-series dashcards.
 ;; Trend charts were added more recently and will not have multi-series.
-;; Despite this, the function `pu/execute-multi-card` will still correctly execute dashcards.
-;; This conditional is here to cover the case of trend charts in Alerts (not subscriptions). Alerts
-;; exist on Questions and thus have no associated dashcard, which causes `pu/execute-multi-card` to fail.
 (mu/defmethod render :javascript_visualization :- formatter/RenderedPulseCard
-  [_chart-type render-type _timezone-id card dashcard _data]
-  (let [combined-cards-results (if dashcard
-                                 (pu/execute-multi-card card dashcard)
-                                 [(pu/execute-card {:creator_id (:creator_id card)} (:id card))])
-        cards-with-data        (map
-                                (comp
-                                 add-dashcard-timeline-events
-                                 (fn [c d] {:card c :data d}))
-                                (map :card combined-cards-results)
-                                (map #(get-in % [:result :data]) combined-cards-results))
-        dashcard-viz-settings  (get dashcard :visualization_settings)
-        {rendered-type :type content :content} (js-svg/javascript-visualization cards-with-data dashcard-viz-settings)]
+  [_chart-type render-type _timezone-id card dashcard data]
+  (let [series-cards-results                   (:series-results dashcard)
+        cards-with-data                        (->> series-cards-results
+                                                    (map raise-data-one-level)
+                                                    (cons {:card card :data data})
+                                                    (map add-dashcard-timeline-events)
+                                                    (m/distinct-by #(get-in % [:card :id])))
+        viz-settings                           (or (get dashcard :visualization_settings)
+                                                   (get card :visualization_settings))
+        {rendered-type :type content :content} (js-svg/javascript-visualization cards-with-data viz-settings)]
     (case rendered-type
       :svg
       (let [image-bundle (image-bundle/make-image-bundle
-                           render-type
-                           (js-svg/svg-string->bytes content))]
+                          render-type
+                          (js-svg/svg-string->bytes content))]
         {:attachments
          (when image-bundle
            (image-bundle/image-bundle->attachment image-bundle))

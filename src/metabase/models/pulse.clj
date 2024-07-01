@@ -87,12 +87,17 @@
 
 (t2/define-before-update :model/Pulse
   [notification]
-  (let [{:keys [collection_id dashboard_id]} (t2/original notification)]
+  (let [{:keys [collection_id dashboard_id]} (t2/original notification)
+        changes                              (t2/changes notification)]
     (when (and dashboard_id
                (contains? notification :collection_id)
                (not= (:collection_id notification) collection_id)
                (not *allow-moving-dashboard-subscriptions*))
       (throw (ex-info (tru "collection ID of a dashboard subscription cannot be directly modified") notification)))
+    (when (contains? changes :archived)
+      (if (:archived changes)
+        (t2/update! :model/PulseChannel :pulse_id (u/the-id notification) {:enabled false})
+        (t2/update! :model/PulseChannel :pulse_id (u/the-id notification) {:enabled true})))
     (when (and dashboard_id
                (contains? notification :dashboard_id)
                (not= (:dashboard_id notification) dashboard_id))
@@ -100,6 +105,11 @@
   (u/prog1 (t2/changes notification)
     (assert-valid-parameters notification)
     (collection/check-collection-namespace Pulse (:collection_id notification))))
+
+(t2/define-before-delete :model/Pulse
+  [pulse]
+  ;; to trigger deleting the scheduled jobs
+  (t2/delete! :model/PulseChannel :pulse_id (u/the-id pulse)))
 
 (defn- alert->card
   "Return the Card associated with an Alert, fetching it if needed, for permissions-checking purposes."
@@ -283,7 +293,7 @@
   "Fetch a single *Pulse*, and hydrate it with a set of 'standard' hydrations; remove Alert columns, since this is a
   *Pulse* and they will all be unset."
   [pulse-or-id]
-  (some-> (t2/select-one Pulse :id (u/the-id pulse-or-id), :alert_condition nil)
+  (some-> (t2/select-one Pulse :id (u/the-id pulse-or-id))
           hydrate-notification
           notification->pulse))
 

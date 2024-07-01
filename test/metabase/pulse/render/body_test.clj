@@ -8,6 +8,7 @@
    [hickory.select :as hik.s]
    [metabase.formatter :as formatter]
    [metabase.models :refer [Card]]
+   [metabase.pulse :as pulse]
    [metabase.pulse.render.body :as body]
    [metabase.pulse.render.test-util :as render.tu]
    [metabase.pulse.util :as pu]
@@ -627,7 +628,7 @@
                                                                                                    [:avg [:field (mt/id :orders :subtotal) nil]]]}}
                                                          :creator_id    (mt/user->id :crowberto)}]
           (let [data                   (qp/process-query dataset-query)
-                combined-cards-results (pu/execute-multi-card card nil)
+                combined-cards-results [(pu/execute-card card card nil)]
                 cards-with-data        (map
                                         (comp
                                          #'body/add-dashcard-timeline-events
@@ -692,7 +693,7 @@
   [content-to-match]
   (fn [loc]
     (let [{:keys [content]} (zip/node loc)]
-      (= content content-to-match ))))
+      (= content content-to-match))))
 
 (defn- parse-transform [s]
   (let [numbers (-> (re-find #"matrix\((.+)\)" s)
@@ -719,7 +720,7 @@
                     :Gizmo     {:axis dir}
                     :Widget    {:axis dir}},
                    :graph.dimensions ["PRICE" "CATEGORY"],
-                   :graph.metrics    ["count"]}) ]
+                   :graph.metrics    ["count"]})]
         (mt/with-temp [:model/Card {left-card-id :id} {:display                :bar
                                                        :visualization_settings (viz "left")
                                                        :dataset_query          q}
@@ -751,3 +752,113 @@
                                          :e)]
               (is (= 1 (count axis-label-element)))
               (is (< 200 axis-y-transform)))))))))
+
+(deftest multiseries-dashcard-render-test
+  (testing "Multi-series dashcards render with every series. (#42730)"
+    (mt/dataset test-data
+      (let [q {:database (mt/id)
+               :type     :query
+               :query
+               {:source-table (mt/id :products)
+                :aggregation  [[:count]]
+                :breakout
+                [[:field (mt/id :products :category) {:base-type :type/Text}]]}}]
+        (mt/with-temp [:model/Card {card-a-id :id} {:display       :bar
+                                                    :dataset_query q}
+                       :model/Card {card-b-id :id} {:display       :bar
+                                                    :dataset_query q}
+                       :model/Dashboard {dash-id :id} {}
+                       :model/DashboardCard {dashcard-id :id} {:dashboard_id dash-id
+                                                               :card_id      card-a-id}
+                       :model/DashboardCardSeries _ {:dashboardcard_id dashcard-id
+                                                     :card_id          card-b-id}]
+          (mt/with-current-user (mt/user->id :rasta)
+            (let [card-doc               (render.tu/render-card-as-hickory card-a-id)
+                  dashcard-doc           (render.tu/render-dashcard-as-hickory dashcard-id)
+                  card-path-elements     (hik.s/select (hik.s/tag :path) card-doc)
+                  card-paths-count       (count card-path-elements)
+                  dashcard-path-elements (hik.s/select (hik.s/tag :path) dashcard-doc)
+                  expected-dashcard-paths-count (+ 4 card-paths-count)]
+              ;; SVG Path elements are used to draw the bars in a bar graph.
+              ;; They are also used to create the axes lines, so we establish a count of a single card's path elements
+              ;; to compare against.
+              ;; Since we know that the Products sample data has 4 Product categories, we can reliably expect
+              ;; that Adding a series to the card that is identical to the first card will result in 4 more path elements.
+              (is (= expected-dashcard-paths-count (count dashcard-path-elements))))))))))
+
+(deftest multiseries-dashcard-render-filters-test
+  (testing "Multi-series dashcards render with every series properly filtered (#39083)"
+    (mt/dataset test-data
+      (let [q {:database (mt/id)
+               :type     :query
+               :query
+               {:source-table (mt/id :orders)
+                :aggregation  [[:count]]
+                :breakout
+                [[:field (mt/id :orders :created_at) {:base-type :type/DateTime :temporal-unit :month}]]}}]
+        (mt/with-temp [:model/Card {card-a-id :id} {:name          "series_a"
+                                                    :display       :bar
+                                                    :dataset_query q}
+                       :model/Card {card-b-id :id} {:name          "series_b"
+                                                    :display       :bar
+                                                    :dataset_query q}
+                       :model/Dashboard {dash-id :id} {:parameters [{:name      "Date Filter"
+                                                                     :id        "944bba5f"
+                                                                     :type      :date/month-year
+                                                                     :sectionId "date"}]}
+                       :model/DashboardCard {dashcard-id :id}
+                       {:dashboard_id dash-id
+                        :card_id      card-a-id
+                        :visualization_settings
+                        {:graph.dimensions ["CREATED_AT"],
+                         :series_settings  {"series_a" {:color "#AAA"}
+                                            "series_b" {:color "#BBB"}}
+                         :graph.metrics    ["count"]}
+                        :parameter_mappings
+                        [{:parameter_id "944bba5f"
+                          :card_id      card-a-id
+                          :target       [:dimension [:field (mt/id :orders :created_at) {:base-type :type/DateTime}]]}
+                         {:parameter_id "944bba5f"
+                          :card_id      card-b-id
+                          :target       [:dimension [:field (mt/id :orders :created_at) {:base-type :type/DateTime}]]}]}
+                       :model/DashboardCardSeries _ {:dashboardcard_id dashcard-id
+                                                     :card_id          card-b-id}]
+          (mt/with-current-user (mt/user->id :rasta)
+            (let [dashcard-doc           (render.tu/render-dashcard-as-hickory
+                                          dashcard-id
+                                          [{:value     "2019-05"
+                                            :id        "944bba5f"
+                                            :sectionId "date"
+                                            :type      :date/month-year
+                                            :target    [:dimension [:field (mt/id :orders :created_at) {:base-type :type/DateTime}]]}])
+                  dashcard-path-elements (hik.s/select (hik.s/tag :path) dashcard-doc)
+                  ;; the series bars each have distinct colours, so we can group by those attrs to get a count.
+                  ;; and remove any paths that are 'transparent'
+                  series-counts          (-> (group-by #(get-in % [:attrs :fill]) dashcard-path-elements)
+                                             (dissoc "transparent")
+                                             (update-vals count))]
+              ;; The series count should be 1 for each series, since we're filtering by a single month of the year
+              ;; and each question is set up with a breakout on :created_at by :month, so filtering on a single month produces just 1 bar.
+              (is (= [1 1]
+                     (vals series-counts))))))))))
+
+(defn- render-card
+  [render-type card data]
+  (body/render render-type :attachment (pulse/defaulted-timezone card) card nil data))
+
+(deftest render-cards-are-thread-safe-test-for-js-visualization
+  (mt/with-temp [:model/Card card {:dataset_query          (mt/mbql-query orders
+                                                                          {:aggregation [[:count]]
+                                                                           :breakout    [$orders.created_at]
+                                                                           :limit       1})
+                                   :display                :line
+                                   :visualization_settings {:graph.dimensions ["CREATED_AT"]
+                                                            :graph.metrics    ["count"]}}]
+    (let [data (:data (qp/process-query (:dataset_query card)))]
+      (is (every? some? (mt/repeat-concurrently 3 #(render-card :javascript_visualization card data)))))))
+
+(deftest render-cards-are-thread-safe-test-for-table
+  (mt/with-temp [:model/Card card {:dataset_query (mt/mbql-query venues {:limit 1})
+                                   :display       :table}]
+    (let [data (:data (qp/process-query (:dataset_query card)))]
+      (is (every? some? (mt/repeat-concurrently 3 #(render-card :table card data)))))))

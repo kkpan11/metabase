@@ -13,10 +13,11 @@
    [clojure.java.jdbc :as jdbc]
    [clojure.test :refer :all]
    [java-time.api :as t]
+   [medley.core :as m]
    [metabase.config :as config]
    [metabase.db :as mdb]
-   [metabase.db.custom-migrations :as custom-migrations]
    [metabase.db.custom-migrations-test :as custom-migrations-test]
+   [metabase.db.liquibase :as liquibase]
    [metabase.db.query :as mdb.query]
    [metabase.db.schema-migrations-test.impl :as impl]
    [metabase.models
@@ -30,8 +31,11 @@
             PermissionsGroup
             Table
             User]]
+   [metabase.models.collection :as collection]
    [metabase.test :as mt]
    [metabase.test.fixtures :as fixtures]
+   [metabase.util.encryption :as encryption]
+   [metabase.util.encryption-test :as encryption-test]
    [toucan2.core :as t2]))
 
 (set! *warn-on-reflection* true)
@@ -120,18 +124,22 @@
                                                                        :created_at             #t "2021-10-20T02:09Z"
                                                                        :updated_at             #t "2022-10-20T02:09Z"})]
         (migrate!)
-        (testing "A personal Collection should get created_at set by to the date_joined from its owner"
-          (is (= (t/offset-date-time #t "2022-10-20T02:09Z")
-                 (t/offset-date-time (t2/select-one-fn :created_at Collection :id personal-collection-id)))))
-        (testing "A non-personal Collection should get created_at set to its oldest object"
-          (is (= (t/offset-date-time #t "2021-10-20T02:09Z")
-                 (t/offset-date-time (t2/select-one-fn :created_at Collection :id impersonal-collection-id)))))
-        (testing "Empty Collection should not have been updated"
-          (let [empty-collection-created-at (t/offset-date-time (t2/select-one-fn :created_at Collection :id empty-collection-id))]
-            (is (not= (t/offset-date-time #t "2021-10-20T02:09Z")
-                      empty-collection-created-at))
-            (is (not= (t/offset-date-time #t "2022-10-20T02:09Z")
-                      empty-collection-created-at))))))))
+        ;; Urgh. `collection/is-trash?` will select the Trash collection (cached) based on its `type`. But as of this
+        ;; migration, this `type` does not exist yet. Neither does the Trash collection though, so let's just ... make
+        ;; that so.
+        (with-redefs [collection/is-trash? (constantly false)]
+          (testing "A personal Collection should get created_at set by to the date_joined from its owner"
+            (is (= (t/offset-date-time #t "2022-10-20T02:09Z")
+                   (t/offset-date-time (t2/select-one-fn :created_at [:model/Collection :created_at] :id personal-collection-id)))))
+          (testing "A non-personal Collection should get created_at set to its oldest object"
+            (is (= (t/offset-date-time #t "2021-10-20T02:09Z")
+                   (t/offset-date-time (t2/select-one-fn :created_at [:model/Collection :created_at] :id impersonal-collection-id)))))
+          (testing "Empty Collection should not have been updated"
+            (let [empty-collection-created-at (t/offset-date-time (t2/select-one-fn :created_at Collection :id empty-collection-id))]
+              (is (not= (t/offset-date-time #t "2021-10-20T02:09Z")
+                        empty-collection-created-at))
+              (is (not= (t/offset-date-time #t "2022-10-20T02:09Z")
+                        empty-collection-created-at)))))))))
 
 (deftest deduplicate-dimensions-test
   (testing "Migrations v46.00-029 thru v46.00-031: make Dimension field_id unique instead of field_id + name"
@@ -423,47 +431,47 @@
 (deftest add-revision-most-recent-test
   (testing "Migrations v48.00-008-v48.00-009: add `revision.most_recent`"
     (impl/test-migrations ["v48.00-007"] [migrate!]
-      (let [user-id          (:id (create-raw-user! (mt/random-email)))
-            old              (t/minus (t/local-date-time) (t/hours 1))
-            rev-dash-1-old (first (t2/insert-returning-pks! (t2/table-name :model/Revision)
-                                                            {:model       "dashboard"
-                                                             :model_id    1
-                                                             :user_id     user-id
-                                                             :object      "{}"
-                                                             :is_creation true
-                                                             :timestamp   old}))
-            rev-dash-1-new (first (t2/insert-returning-pks! (t2/table-name :model/Revision)
-                                                            {:model       "dashboard"
-                                                             :model_id    1
-                                                             :user_id     user-id
-                                                             :object      "{}"
-                                                             :timestamp   :%now}))
-            rev-dash-2-old (first (t2/insert-returning-pks! (t2/table-name :model/Revision)
-                                                            {:model       "dashboard"
-                                                             :model_id    2
-                                                             :user_id     user-id
-                                                             :object      "{}"
-                                                             :is_creation true
-                                                             :timestamp   old}))
-            rev-dash-2-new (first (t2/insert-returning-pks! (t2/table-name :model/Revision)
-                                                            {:model       "dashboard"
-                                                             :model_id    2
-                                                             :user_id     user-id
-                                                             :object      "{}"
-                                                             :timestamp   :%now}))
-            rev-card-1-old (first (t2/insert-returning-pks! (t2/table-name :model/Revision)
-                                                            {:model       "card"
-                                                             :model_id    1
-                                                             :user_id     user-id
-                                                             :object      "{}"
-                                                             :is_creation true
-                                                             :timestamp   old}))
-            rev-card-1-new (first (t2/insert-returning-pks! (t2/table-name :model/Revision)
-                                                            {:model       "card"
-                                                             :model_id    1
-                                                             :user_id     user-id
-                                                             :object      "{}"
-                                                             :timestamp   :%now}))]
+      (let [user-id         (:id (create-raw-user! (mt/random-email)))
+            old             (t/minus (t/local-date-time) (t/hours 1))
+            rev-dash-1-old  (t2/insert-returning-pk! (t2/table-name :model/Revision)
+                                                     {:model       "dashboard"
+                                                      :model_id    1
+                                                      :user_id     user-id
+                                                      :object      "{}"
+                                                      :is_creation true
+                                                      :timestamp   old})
+            rev-dash-1-new  (t2/insert-returning-pk! (t2/table-name :model/Revision)
+                                                     {:model       "dashboard"
+                                                      :model_id    1
+                                                      :user_id     user-id
+                                                      :object      "{}"
+                                                      :timestamp   :%now})
+            rev-dash-2-old  (t2/insert-returning-pk! (t2/table-name :model/Revision)
+                                                     {:model       "dashboard"
+                                                      :model_id    2
+                                                      :user_id     user-id
+                                                      :object      "{}"
+                                                      :is_creation true
+                                                      :timestamp   old})
+            rev-dash-2-new  (t2/insert-returning-pk! (t2/table-name :model/Revision)
+                                                     {:model       "dashboard"
+                                                      :model_id    2
+                                                      :user_id     user-id
+                                                      :object      "{}"
+                                                      :timestamp   :%now})
+            rev-card-1-old  (t2/insert-returning-pk! (t2/table-name :model/Revision)
+                                                     {:model       "card"
+                                                      :model_id    1
+                                                      :user_id     user-id
+                                                      :object      "{}"
+                                                      :is_creation true
+                                                      :timestamp   old})
+            rev-card-1-new  (t2/insert-returning-pk! (t2/table-name :model/Revision)
+                                                     {:model       "card"
+                                                      :model_id    1
+                                                      :user_id     user-id
+                                                      :object      "{}"
+                                                      :timestamp   :%now})]
         (migrate!)
         (is (= #{false} (t2/select-fn-set :most_recent (t2/table-name :model/Revision)
                                           :id [:in [rev-dash-1-old rev-dash-2-old rev-card-1-old]])))
@@ -496,16 +504,23 @@
 (deftest remove-collection-color-test
   (testing "Migration v48.00-019"
     (impl/test-migrations ["v48.00-019"] [migrate!]
-      (let [collection-id (first (t2/insert-returning-pks! (t2/table-name Collection) {:name "Amazing collection"
-                                                                                       :slug "amazing_collection"
-                                                                                       :color "#509EE3"}))]
+      (with-redefs [;; Urgh. `collection/is-trash?` will select the Trash collection (cached) based on its `type`. But as of this
+                    ;; migration, this `type` does not exist yet. Neither does the Trash collection though, so let's just ... make
+                    ;; that so.
+                    collection/is-trash? (constantly false)
+                    ;; Also avoid loading sample content, because this test breaks the assumption that only the trash
+                    ;; collection exists at the time of the migration
+                    config/load-sample-content? (constantly false)]
+        (let [collection-id (first (t2/insert-returning-pks! (t2/table-name Collection) {:name "Amazing collection"
+                                                                                         :slug "amazing_collection"
+                                                                                         :color "#509EE3"}))]
 
-        (testing "Collection should exist and have the color set by the user prior to migration"
-          (is (= "#509EE3" (:color (t2/select-one :model/Collection :id collection-id)))))
+          (testing "Collection should exist and have the color set by the user prior to migration"
+            (is (= "#509EE3" (:color (t2/select-one :model/Collection :id collection-id)))))
 
-        (migrate!)
-        (testing "should drop the existing color column"
-          (is (not (contains? (t2/select-one :model/Collection :id collection-id) :color))))))))
+          (migrate!)
+          (testing "should drop the existing color column"
+            (is (not (contains? (t2/select-one :model/Collection :id collection-id) :color)))))))))
 
 (deftest audit-v2-views-test
   (testing "Migrations v48.00-029 - end"
@@ -772,6 +787,88 @@
       (migrate!)
       (is (= "true"
              (t2/select-one-fn :value (t2/table-name :model/Setting) :key "enable-public-sharing"))))))
+
+(deftest fix-multiple-revistion-most-recent-test
+  (testing "Migrations v49.2024-05-07T10:00:00: Set revision.most_recent = true ensures that there is only one most recent revision per model_id"
+    (mt/test-driver :mysql
+      (impl/test-migrations "v49.2024-05-07T10:00:00" [migrate!]
+        (let [user-id         (:id (create-raw-user! (mt/random-email)))
+              old             (t/minus (t/local-date-time) (t/hours 1))
+              now             (t/local-date-time)
+              rev-dash-1-old  (t2/insert-returning-pk! (t2/table-name :model/Revision)
+                                                       {:model       "dashboard"
+                                                        :model_id    1
+                                                        :user_id     user-id
+                                                        :object      "{}"
+                                                        :is_creation true
+                                                        :most_recent false
+                                                        :timestamp   old})
+              rev-dash-1-new  (t2/insert-returning-pk! (t2/table-name :model/Revision)
+                                                       {:model       "dashboard"
+                                                        :model_id    1
+                                                        :user_id     user-id
+                                                        :object      "{}"
+                                                        :most_recent true
+                                                        :timestamp   now})
+              rev-dash-2-old  (t2/insert-returning-pk! (t2/table-name :model/Revision)
+                                                       {:model       "dashboard"
+                                                        :model_id    2
+                                                        :user_id     user-id
+                                                        :object      "{}"
+                                                        :is_creation true
+                                                        :most_recent true
+                                                        :timestamp   old})
+              rev-dash-2-new  (t2/insert-returning-pk! (t2/table-name :model/Revision)
+                                                       {:model       "dashboard"
+                                                        :model_id    2
+                                                        :user_id     user-id
+                                                        :object      "{}"
+                                                        :most_recent true
+                                                        :timestamp   now})
+              rev-card-1-old  (t2/insert-returning-pk! (t2/table-name :model/Revision)
+                                                       {:model       "card"
+                                                        :model_id    1
+                                                        :user_id     user-id
+                                                        :object      "{}"
+                                                        :is_creation true
+                                                        :most_recent false
+                                                        :timestamp   now})
+              rev-card-1-new  (t2/insert-returning-pk! (t2/table-name :model/Revision)
+                                                       {:model       "card"
+                                                        :model_id    1
+                                                        :user_id     user-id
+                                                        :object      "{}"
+                                                        :most_recent true
+                                                        :timestamp   now})
+              rev-card-2-old  (t2/insert-returning-pk! (t2/table-name :model/Revision)
+                                                       {:model       "card"
+                                                        :model_id    2
+                                                        :user_id     user-id
+                                                        :object      "{}"
+                                                        :is_creation true
+                                                        :most_recent true
+                                                        :timestamp   now})
+              rev-card-2-new  (t2/insert-returning-pk! (t2/table-name :model/Revision)
+                                                       {:model       "card"
+                                                        :model_id    2
+                                                        :user_id     user-id
+                                                        :object      "{}"
+                                                        ;; both this and the previous one has most recent = true with the same timestamp,
+                                                        ;; the one that has higher id will be updated
+                                                        :most_recent true
+                                                        :timestamp   now})
+              ;; test case where there is only one migration per item
+              rev-card-3-new  (t2/insert-returning-pk! (t2/table-name :model/Revision)
+                                                       {:model       "card"
+                                                        :model_id    3
+                                                        :user_id     user-id
+                                                        :object      "{}"
+                                                        :most_recent true
+                                                        :timestamp   now})]
+         (migrate!)
+         (is (= {false #{rev-dash-1-old rev-dash-2-old rev-card-1-old rev-card-2-old}
+                 true  #{rev-dash-1-new rev-dash-2-new rev-card-1-new rev-card-2-new rev-card-3-new}}
+                (update-vals (group-by :most_recent (t2/select (t2/table-name :model/Revision))) #(set (map :id %))))))))))
 
 (defn- clear-permissions!
   []
@@ -1398,51 +1495,15 @@
         (migrate! :down 49)
         (is (nil? (t2/select-fn-vec :object (t2/table-name :model/Permissions) :group_id group-id)))))))
 
-(deftest create-sample-content-test
-  (testing "The sample content is created iff *create-sample-content*=true"
-    (doseq [create? [true false]]
-      (testing (str "*create-sample-content* = " create?)
-        (impl/test-migrations "v50.2024-04-09T15:55:22" [migrate!]
-          (let [sample-content-created? #(boolean (not-empty (t2/query "SELECT * FROM report_dashboard where name = 'E-commerce insights'")))]
-            (binding [custom-migrations/*create-sample-content* create?]
-              (is (false? (sample-content-created?)))
-              (migrate!)
-              (is ((if create? true? false?) (sample-content-created?)))))))))
-  (testing "The sample content isn't created if the sample database existed already in the past (or any database for that matter)"
-    (impl/test-migrations "v50.2024-04-09T15:55:22" [migrate!]
-      (let [sample-content-created? #(boolean (not-empty (t2/query "SELECT * FROM report_dashboard where name = 'E-commerce insights'")))]
-        (is (false? (sample-content-created?)))
-        (t2/insert-returning-pks! :metabase_database {:name       "db"
-                                                      :engine     "h2"
-                                                      :created_at :%now
-                                                      :updated_at :%now
-                                                      :details    "{}"})
-        (t2/query {:delete-from :metabase_database})
-        (migrate!)
-        (is (false? (sample-content-created?)))
-        (is (empty? (t2/query "SELECT * FROM metabase_database"))
-            "No database should have been created"))))
-  (testing "The sample content isn't created if a user existed already"
-    (impl/test-migrations "v50.2024-04-09T15:55:22" [migrate!]
-      (let [sample-content-created? #(boolean (not-empty (t2/query "SELECT * FROM report_dashboard where name = 'E-commerce insights'")))]
-        (is (false? (sample-content-created?)))
-        (t2/insert-returning-pks!
-         :core_user
-         {:first_name       "Rasta"
-          :last_name        "Toucan"
-          :email            "rasta@metabase.com"
-          :password         "password"
-          :password_salt    "and pepper"
-          :date_joined      :%now})
-        (migrate!)
-        (is (false? (sample-content-created?)))))))
-
 (deftest cache-config-migration-test
   (testing "Caching config is correctly copied over"
-    (impl/test-migrations "v50.2024-04-12T12:33:09" [migrate!]
-      (mdb.query/update-or-insert! :model/Setting {:key "enable-query-caching"} (constantly {:value "true"}))
-      (mdb.query/update-or-insert! :model/Setting {:key "query-caching-ttl-ratio"} (constantly {:value "100"}))
-      (mdb.query/update-or-insert! :model/Setting {:key "query-caching-min-ttl"} (constantly {:value "123"}))
+    (impl/test-migrations ["v50.2024-06-12T12:33:07"] [migrate!]
+      ;; this peculiar setup is to reproduce #44012, `enable-query-caching` should be unencrypted for the condition
+      ;; to hit it
+      (t2/insert! :setting [{:key "enable-query-caching", :value (encryption/maybe-encrypt "true")}])
+      (encryption-test/with-secret-key "whateverwhatever"
+        (t2/insert! :setting [{:key "query-caching-ttl-ratio", :value (encryption/maybe-encrypt "100")}
+                              {:key "query-caching-min-ttl", :value (encryption/maybe-encrypt "123")}]))
 
       (let [user (create-raw-user! (mt/random-email))
             db   (t2/insert-returning-pk! :metabase_database (-> (mt/with-temp-defaults Database)
@@ -1466,31 +1527,34 @@
                                            :database_id            db
                                            :created_at             :%now
                                            :updated_at             :%now})]
-        (migrate!)
+
+        (encryption-test/with-secret-key "whateverwhatever"
+          (migrate! :up))
 
         (is (=? [{:model    "root"
                   :model_id 0
-                  :strategy :ttl
+                  :strategy "ttl"
                   :config   {:multiplier      100
                              :min_duration_ms 123}}
                  {:model    "database"
                   :model_id db
-                  :strategy :duration
+                  :strategy "duration"
                   :config   {:duration 10 :unit "hours"}}
                  {:model    "dashboard"
                   :model_id dash
-                  :strategy :duration
+                  :strategy "duration"
                   :config   {:duration 20 :unit "hours"}}
                  {:model    "question"
                   :model_id card
-                  :strategy :duration
+                  :strategy "duration"
                   :config   {:duration 30 :unit "hours"}}]
-                (t2/select :model/CacheConfig))))))
+                (->> (t2/select :cache_config)
+                     (mapv #(update % :config json/decode true))))))))
   (testing "And not copied if caching is disabled"
-    (impl/test-migrations "v50.2024-04-12T12:33:09" [migrate!]
-      (mdb.query/update-or-insert! :model/Setting {:key "enable-query-caching"} (constantly {:value "false"}))
-      (mdb.query/update-or-insert! :model/Setting {:key "query-caching-ttl-ratio"} (constantly {:value "100"}))
-      (mdb.query/update-or-insert! :model/Setting {:key "query-caching-min-ttl"} (constantly {:value "123"}))
+    (impl/test-migrations ["v50.2024-04-12T12:33:07"] [migrate!]
+      (t2/insert! :setting [{:key "enable-query-caching", :value (encryption/maybe-encrypt "false")}
+                            {:key "query-caching-ttl-ratio", :value (encryption/maybe-encrypt "100")}
+                            {:key "query-caching-min-ttl", :value (encryption/maybe-encrypt "123")}])
 
       ;; this one to have custom configuration to check they are not copied over
       (t2/insert-returning-pk! :metabase_database (-> (mt/with-temp-defaults Database)
@@ -1499,7 +1563,54 @@
                                                       (assoc :cache_ttl 10)))
       (migrate!)
       (is (= []
-             (t2/select :model/CacheConfig))))))
+             (t2/select :cache_config))))))
+
+(deftest cache-config-mysql-update-test
+  (when (= (mdb/db-type) :mysql)
+    (testing "Root cache config for mysql is updated with correct values"
+      (encryption-test/with-secret-key "whateverwhatever"
+        (impl/test-migrations ["v50.2024-06-12T12:33:07"] [migrate!]
+          (t2/insert! :setting [{:key "enable-query-caching", :value (encryption/maybe-encrypt "true")}
+                                {:key "query-caching-ttl-ratio", :value (encryption/maybe-encrypt "100")}
+                                {:key "query-caching-min-ttl", :value (encryption/maybe-encrypt "123")}])
+
+          ;; the idea here is that `v50.2024-04-12T12:33:09` during execution with partially encrypted data (see
+          ;; `cache-config-migration-test`) instead of throwing an error just silently put zeros in config. If config
+          ;; contains zeros, we assume human did not touch it yet and update with existing (decrypted thanks to
+          ;; `v50.2024-06-12T12:33:07`) settings
+          (t2/insert! :cache_config {:model    "root"
+                                     :model_id 0
+                                     :strategy "ttl"
+                                     :config   (json/encode {:multiplier      0
+                                                             :min_duration_ms 0})})
+          (migrate!)
+
+          (is (=? {:model    "root"
+                   :model_id 0
+                   :strategy "ttl"
+                   :config {:multiplier      100
+                            :min_duration_ms 123}}
+                  (-> (t2/select-one :cache_config)
+                      (update :config json/decode true)))))))))
+
+(deftest cache-config-old-id-cleanup
+  (testing "Cache config migration old id is removed from databasechangelog"
+    (impl/test-migrations ["v50.2024-06-28T12:35:50"] [migrate!]
+      (let [clog       (keyword (liquibase/changelog-table-name (mdb/data-source)))
+            last-order (:orderexecuted (t2/select-one clog {:order-by [[:orderexecuted :desc]]}))]
+        (t2/insert! clog [{:id            "v50.2024-04-12T12:33:09"
+                           :author        "piranha"
+                           :filename      "001_update_migrations.yaml"
+                           :dateexecuted  :%now
+                           :orderexecuted (inc last-order)
+                           :exectype      "EXECUTED"}])
+
+        (is (=? {:id            "v50.2024-04-12T12:33:09"
+                 :orderexecuted pos?}
+                (t2/select-one clog :id "v50.2024-04-12T12:33:09")))
+
+        (migrate!)
+        (is (nil? (t2/select-one clog :id "v50.2024-04-12T12:33:09")))))))
 
 (deftest split-data-permissions-migration-test
   (testing "View Data and Create Query permissions are created correctly based on existing data permissions"
@@ -1925,15 +2036,51 @@
         (is (= #{(format "/block/db/%d/" db-id)}
                (t2/select-fn-set :object (t2/table-name :model/Permissions) :group_id group-id)))))))
 
+(deftest sandboxing-rollback-test
+  ;; Rollback tests flake on MySQL, so only run on Postgres/H2
+  (mt/test-drivers [:postgres :h2]
+    (testing "Can we rollback to 49 when sandboxing is configured"
+      (impl/test-migrations ["v50.2024-01-10T03:27:29" "v50.2024-06-20T13:21:30"] [migrate!]
+        (let [db-id         (first (t2/insert-returning-pks! (t2/table-name Database) {:name       "DB"
+                                                                                       :engine     "h2"
+                                                                                       :created_at :%now
+                                                                                       :updated_at :%now
+                                                                                       :details    "{}"}))
+              table-id      (first (t2/insert-returning-pks! (t2/table-name Table) {:db_id      db-id
+                                                                                    :schema     "SchemaName"
+                                                                                    :name       "Table"
+                                                                                    :created_at :%now
+                                                                                    :updated_at :%now
+                                                                                    :active     true}))
+              permission-id (t2/insert-returning-pk! (t2/table-name :model/Permissions) {:object "/db/fake-permission/"
+                                                                                         :group_id 1})
+              _             (t2/query-one {:insert-into :sandboxes
+                                           :values      [{:group_id             1
+                                                          :table_id             table-id
+                                                          :attribute_remappings "{\"foo\", 1}"
+                                                          :permission_id        permission-id}]})
+              expected        {:group_id             1
+                               :table_id             table-id
+                               :attribute_remappings "{\"foo\", 1}"}]
+          (migrate!)
+          (is (=? expected (t2/select-one :sandboxes :table_id table-id)))
+          (migrate! :down 49)
+          (is (=? expected (t2/select-one :sandboxes :table_id table-id))))))))
+
 (deftest view-count-test
   (testing "report_card.view_count and report_dashboard.view_count should be populated"
-    (impl/test-migrations ["v50.2024-04-25T16:29:31" "v50.2024-04-25T16:29:34"] [migrate!]
+    (impl/test-migrations ["v50.2024-04-25T16:29:31" "v50.2024-04-25T16:29:36"] [migrate!]
       (let [user-id 13371338 ; use internal user to avoid creating a real user
             db-id   (t2/insert-returning-pk! :metabase_database {:name       "db"
                                                                  :engine     "postgres"
                                                                  :created_at :%now
                                                                  :updated_at :%now
                                                                  :details    "{}"})
+            table-id (t2/insert-returning-pk! :metabase_table {:active     true
+                                                               :db_id      db-id
+                                                               :name       "a table"
+                                                               :created_at :%now
+                                                               :updated_at :%now})
             dash-id (t2/insert-returning-pk! :report_dashboard {:name       "A dashboard"
                                                                 :creator_id user-id
                                                                 :parameters "[]"
@@ -1948,6 +2095,10 @@
                                                            :created_at             :%now
                                                            :updated_at             :%now})
             _ (t2/insert-returning-pk! :view_log {:user_id   user-id
+                                                  :model     "table"
+                                                  :model_id  table-id
+                                                  :timestamp :%now})
+            _ (t2/insert-returning-pk! :view_log {:user_id   user-id
                                                   :model     "card"
                                                   :model_id  card-id
                                                   :timestamp :%now})
@@ -1957,5 +2108,100 @@
                                                     :model_id  dash-id
                                                     :timestamp :%now}))]
         (migrate!)
+        (is (= 1 (t2/select-one-fn :view_count :metabase_table table-id)))
         (is (= 1 (t2/select-one-fn :view_count :report_card card-id)))
         (is (= 2 (t2/select-one-fn :view_count :report_dashboard dash-id)))))))
+
+(deftest trash-migrations-test
+  (impl/test-migrations ["v50.2024-05-29T14:04:47" "v50.2024-05-29T18:42:15"] [migrate!]
+    (with-redefs [collection/is-trash? (constantly false)]
+      (let [collection-id    (t2/insert-returning-pk! (t2/table-name :model/Collection)
+                                                      {:name     "Silly Collection"
+                                                       :archived true
+                                                       :slug     "silly-collection"})
+            subcollection-id (t2/insert-returning-pk! (t2/table-name :model/Collection)
+                                                      {:name     "Subcollection"
+                                                       :slug     "subcollection"
+                                                       :archived true
+                                                       :location (collection/children-location (t2/select-one :model/Collection :id collection-id))})]
+        (migrate!)
+        (is (:archived_directly (t2/select-one :model/Collection :id collection-id)))
+        (is (not (:archived_directly (t2/select-one :model/Collection :id subcollection-id))))
+        (is (= (:archive_operation_id (t2/select-one :model/Collection :id collection-id))
+               (:archive_operation_id (t2/select-one :model/Collection :id subcollection-id))))
+        (let [trash-collection-id (collection/trash-collection-id)]
+          (testing "After a down-migration, the trash is removed entirely."
+            (migrate! :down 49)
+            (is (nil? (t2/select-one :model/Collection :name "Trash")))
+            (is (= "/" (t2/select-one-fn :location :model/Collection :id collection-id)))
+            (is (= (str "/" collection-id "/") (t2/select-one-fn :location :model/Collection :id subcollection-id))))
+          (testing "we can migrate back up"
+            (migrate!)
+            (is (:archived_directly (t2/select-one :model/Collection :id collection-id)))
+            (is (not (:archived_directly (t2/select-one :model/Collection :id subcollection-id))))
+            (is (not= trash-collection-id (t2/select-one-pk :model/Collection :type "trash")))
+            (is (= (str "/" collection-id "/")
+                   (t2/select-one-fn :location :model/Collection :id subcollection-id)))))))))
+
+(deftest trash-migrations-make-archive-operation-ids-correctly
+  (impl/test-migrations ["v50.2024-05-29T14:04:47" "v50.2024-05-29T18:42:15"] [migrate!]
+    (with-redefs [collection/is-trash? (constantly false)]
+      (let [relevant-collection-ids (atom #{})
+            parent-id (fn [id]
+                        (:parent_id (t2/hydrate (t2/select-one :model/Collection :id id) :parent_id)))
+            make-collection! (fn [{:keys [archived? in]}]
+                               (let [result (t2/insert-returning-pk!
+                                             (t2/table-name :model/Collection) {:archived archived?
+                                                                                :name (str (gensym))
+                                                                                :slug (#'collection/slugify (str (gensym)))
+                                                                                :location (if in
+                                                                                            (collection/children-location (t2/select-one :model/Collection :id in))
+                                                                                            "/")})]
+                                 (swap! relevant-collection-ids conj result)
+                                 result))
+            a (make-collection! {:archived? true})
+            b (make-collection! {:archived? false :in a})
+            c (make-collection! {:archived? true :in b})
+            d (make-collection! {:archived? true :in c})
+            e (make-collection! {:archived? true :in d})
+            f (make-collection! {:archived? true :in e})
+            g (make-collection! {:archived? true :in e})
+            h (make-collection! {:archived? false :in g})
+            i (make-collection! {:archived? true :in h})]
+        (migrate!)
+        (let [archive-operation-id->collection-ids (m/map-vals #(into #{} (map :id %)) (group-by :archive_operation_id (t2/select :model/Collection :id [:in @relevant-collection-ids])))]
+          (is (= 4 (count archive-operation-id->collection-ids)))
+          (testing "Each contiguous subtree has its own archive_operation_id"
+            (is (= #{#{a} ;; => A is one subtree, none of its children are archived.
+                     #{c d e f g} ;; => C/D/E/[F,G] is a big ol' subtree
+                     #{i} ;; => I is the last archived subtree. It's a grandchild of G, but H isn't archived.
+                     #{b h}} ;; => not archived at all, `archive_operation_id` is nil
+                   (set (vals archive-operation-id->collection-ids)))))
+          (testing "Trashed directly is correctly set"
+            (is (= {true #{a c i}
+                    false #{d e f g}
+                    nil #{b h}}
+                   (m/map-vals #(into #{} (map :id %)) (group-by :archived_directly (t2/select :model/Collection :id [:in @relevant-collection-ids])))))))
+        ;; We can roll back. Nothing got moved around.
+        (migrate! :down 49)
+        (is (= nil (parent-id a)))
+        (is (= a (parent-id b)))
+        (is (= b (parent-id c)))
+        (is (= c (parent-id d)))
+        (is (= d (parent-id e)))
+        (is (= e (parent-id f)))
+        (is (= e (parent-id g)))
+        (is (= g (parent-id h)))
+        (is (= h (parent-id i)))
+        (migrate!)
+        (let [archive-operation-id->collection-ids (m/map-vals #(into #{} (map :id %)) (group-by :archive_operation_id (t2/select :model/Collection :id [:in @relevant-collection-ids])))]
+          (is (= 4 (count archive-operation-id->collection-ids)))
+          (doseq [id (keys archive-operation-id->collection-ids)]
+            (when-not (nil? id)
+              (is (uuid? (java.util.UUID/fromString id)))))
+          (testing "Run the same test as above just to make sure that it survives the round trip"
+            (is (= #{#{a} ;; => A is one subtree, none of its children are archived.
+                     #{c d e f g} ;; => C/D/E/[F,G] is a big ol' subtree
+                     #{i} ;; => I is the last archived subtree. It's a grandchild of G, but H isn't archived.
+                     #{b h}} ;; => not archived at all, `archive_operation_id` is nil
+                   (set (vals archive-operation-id->collection-ids))))))))))

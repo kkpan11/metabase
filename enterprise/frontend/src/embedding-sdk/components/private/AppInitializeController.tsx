@@ -1,16 +1,13 @@
 import type { ReactNode } from "react";
 import { t } from "ttag";
 
-import {
-  DEFAULT_FONT,
-  EMBEDDING_SDK_ROOT_ELEMENT_ID,
-} from "embedding-sdk/config";
+import { EMBEDDING_SDK_ROOT_ELEMENT_ID } from "embedding-sdk/config";
 import { useInitData } from "embedding-sdk/hooks";
 import { useSdkSelector } from "embedding-sdk/store";
 import { getIsInitialized } from "embedding-sdk/store/selectors";
 import type { SDKConfig } from "embedding-sdk/types";
 
-import { SdkContentWrapper } from "./SdkContentWrapper";
+import { SdkGlobalStylesWrapper } from "./SdkGlobalStylesWrapper";
 
 interface AppInitializeControllerProps {
   children: ReactNode;
@@ -28,12 +25,11 @@ export const AppInitializeController = ({
   const isInitialized = useSdkSelector(getIsInitialized);
 
   return (
-    <SdkContentWrapper
+    <SdkGlobalStylesWrapper
       baseUrl={config.metabaseInstanceUrl}
       id={EMBEDDING_SDK_ROOT_ELEMENT_ID}
-      font={config.font ?? DEFAULT_FONT}
     >
       {!isInitialized ? <div>{t`Loading…`}</div> : children}
-    </SdkContentWrapper>
+    </SdkGlobalStylesWrapper>
   );
 };

@@ -1,21 +1,31 @@
 import type { ColorName } from "metabase/lib/colors/types";
 import type { IconName, IconProps } from "metabase/ui";
-import type { PaginationRequest, PaginationResponse } from "metabase-types/api";
+import type {
+  CollectionEssentials,
+  PaginationRequest,
+  PaginationResponse,
+} from "metabase-types/api";
 
 import type { CardDisplayType, CardType } from "./card";
 import type { DatabaseId } from "./database";
+import type { SortingOptions } from "./sorting";
 import type { TableId } from "./table";
 import type { UserId } from "./user";
 
 export type RegularCollectionId = number;
 
-export type CollectionId = RegularCollectionId | "root" | "personal" | "users";
+export type CollectionId =
+  | RegularCollectionId
+  | "root"
+  | "personal"
+  | "users"
+  | "trash";
 
 export type CollectionContentModel = "card" | "dataset";
 
 export type CollectionAuthorityLevel = "official" | null;
 
-export type CollectionType = "instance-analytics" | null;
+export type CollectionType = "instance-analytics" | "trash" | null;
 
 export type LastEditInfo = {
   email: string;
@@ -48,10 +58,12 @@ export interface Collection {
   entity_id?: string;
   description: string | null;
   can_write: boolean;
+  can_restore: boolean;
+  can_delete: boolean;
   archived: boolean;
   children?: Collection[];
   authority_level?: "official" | null;
-  type?: "instance-analytics" | null;
+  type?: "instance-analytics" | "trash" | null;
 
   parent_id?: CollectionId | null;
   personal_owner_id?: UserId;
@@ -59,7 +71,7 @@ export interface Collection {
 
   location: string | null;
   effective_location?: string; // location path containing only those collections that the user has permission to access
-  effective_ancestors?: Collection[];
+  effective_ancestors?: CollectionEssentials[];
 
   here?: CollectionContentModel[];
   below?: CollectionContentModel[];
@@ -72,6 +84,7 @@ export interface Collection {
 export const COLLECTION_ITEM_MODELS = [
   "card",
   "dataset",
+  "metric",
   "dashboard",
   "snippet",
   "collection",
@@ -86,6 +99,7 @@ export interface CollectionItem {
   model: CollectionItemModel;
   name: string;
   description: string | null;
+  archived: boolean;
   copy?: boolean;
   collection_position?: number | null;
   collection_preview?: boolean | null;
@@ -101,6 +115,8 @@ export interface CollectionItem {
   here?: CollectionItemModel[];
   below?: CollectionItemModel[];
   can_write?: boolean;
+  can_restore?: boolean;
+  can_delete?: boolean;
   "last-edit-info"?: LastEditInfo;
   location?: string;
   effective_location?: string;
@@ -121,15 +137,19 @@ export interface CollectionListQuery {
   tree?: boolean;
 }
 
+export type getCollectionRequest = {
+  id: CollectionId;
+  namespace?: "snippets";
+};
+
 export type ListCollectionItemsRequest = {
   id: CollectionId;
   models?: CollectionItemModel[];
   archived?: boolean;
   pinned_state?: "all" | "is_pinned" | "is_not_pinned";
-  sort_column?: "name" | "last_edited_at" | "last_edited_by" | "model";
-  sort_direction?: "asc" | "desc";
   namespace?: "snippets";
-} & PaginationRequest;
+} & PaginationRequest &
+  Partial<SortingOptions>;
 
 export type ListCollectionItemsResponse = {
   data: CollectionItem[];
@@ -165,4 +185,8 @@ export interface ListCollectionsTreeRequest {
   namespace?: string;
   shallow?: boolean;
   "collection-id"?: RegularCollectionId | null;
+}
+
+export interface DeleteCollectionRequest {
+  id: RegularCollectionId;
 }

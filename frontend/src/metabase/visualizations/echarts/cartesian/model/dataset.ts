@@ -1,6 +1,7 @@
 import { t } from "ttag";
 
-import { getObjectKeys, getObjectValues } from "metabase/lib/objects";
+import { getObjectKeys } from "metabase/lib/objects";
+import { parseTimestamp } from "metabase/lib/time-dayjs";
 import { checkNumber, isNotNull } from "metabase/lib/types";
 import { isEmpty } from "metabase/lib/validate";
 import {
@@ -21,6 +22,8 @@ import type {
   XAxisModel,
   NumericAxisScaleTransforms,
   ShowWarning,
+  TimeSeriesXAxisModel,
+  StackModel,
 } from "metabase/visualizations/echarts/cartesian/model/types";
 import type { CartesianChartColumns } from "metabase/visualizations/lib/graph/columns";
 import { getNumberOr } from "metabase/visualizations/lib/settings/row-values";
@@ -42,7 +45,7 @@ import type {
 import { tryGetDate } from "../utils/timeseries";
 
 import { isCategoryAxis, isNumericAxis, isTimeSeriesAxis } from "./guards";
-import { signedLog, signedSquareRoot } from "./transforms";
+import { getBarSeriesDataLabelKey, getColumnScaling } from "./util";
 
 /**
  * Sums two metric column values.
@@ -90,6 +93,11 @@ export const getDatasetKey = (
   return `${datasetKey}:${breakoutValue}`;
 };
 
+interface DatasetColumnInfo {
+  column: DatasetColumn;
+  isMetric: boolean;
+}
+
 /**
  * Aggregates metric column values in a datum for a given row.
  * When a breakoutIndex is specified it aggregates metrics per breakout value.
@@ -103,14 +111,14 @@ export const getDatasetKey = (
  */
 const aggregateColumnValuesForDatum = (
   datum: Record<DataKey, RowValue>,
-  columns: DatasetColumn[],
+  columns: DatasetColumnInfo[],
   row: RowValue[],
   cardId: number,
   dimensionIndex: number,
   breakoutIndex: number | undefined,
   showWarning?: ShowWarning,
 ): void => {
-  columns.forEach((column, columnIndex) => {
+  columns.forEach(({ column, isMetric }, columnIndex) => {
     const rowValue = row[columnIndex];
     const isDimensionColumn = columnIndex === dimensionIndex;
 
@@ -120,9 +128,11 @@ const aggregateColumnValuesForDatum = (
         : getDatasetKey(column, cardId, row[breakoutIndex]);
 
     // The dimension values should not be aggregated, only metrics
-    if (isMetric(column) && !isDimensionColumn) {
+    if (isMetric && !isDimensionColumn) {
       if (seriesKey in datum) {
-        showWarning?.(unaggregatedDataWarning(columns[dimensionIndex]).text);
+        showWarning?.(
+          unaggregatedDataWarning(columns[dimensionIndex].column).text,
+        );
       }
 
       datum[seriesKey] = sumMetric(datum[seriesKey], rowValue);
@@ -156,11 +166,15 @@ export const getJoinedCardsDataset = (
       card,
       data: { rows, cols },
     } = cardSeries;
-    const columns = cardsColumns[index];
+    const datasetColumns = cols.map(column => ({
+      column,
+      isMetric: isMetric(column),
+    }));
+    const chartColumns = cardsColumns[index];
 
-    const dimensionIndex = columns.dimension.index;
+    const dimensionIndex = chartColumns.dimension.index;
     const breakoutIndex =
-      "breakout" in columns ? columns.breakout.index : undefined;
+      "breakout" in chartColumns ? chartColumns.breakout.index : undefined;
 
     for (const row of rows) {
       const dimensionValue = row[dimensionIndex];
@@ -176,7 +190,7 @@ export const getJoinedCardsDataset = (
 
       aggregateColumnValuesForDatum(
         datum,
-        cols,
+        datasetColumns,
         row,
         card.id,
         dimensionIndex,
@@ -235,22 +249,25 @@ export const computeTotal = (datum: Datum, keys: DataKey[]): number =>
   keys.reduce((total, key) => total + getNumberOrZero(datum[key]), 0);
 
 export const getNormalizedDatasetTransform = (
-  seriesDataKeys: DataKey[],
+  stackModels: StackModel[],
 ): TransformFn => {
   return datum => {
-    const total = computeTotal(datum, seriesDataKeys);
-
-    // Copy the dimension value
-    const normalizedDatum: Datum = {
-      [X_AXIS_DATA_KEY]: datum[X_AXIS_DATA_KEY],
+    const normalizedDatum = {
+      ...datum,
     };
 
-    // Compute normalized values for metrics
-    return seriesDataKeys.reduce((acc, key) => {
-      const numericValue = getNumberOrZero(datum[key]);
-      acc[key] = numericValue / total;
-      return acc;
-    }, normalizedDatum);
+    stackModels.forEach(stackModel => {
+      const total = computeTotal(datum, stackModel.seriesKeys);
+
+      // Compute normalized values for metrics
+      return stackModel.seriesKeys.reduce((acc, key) => {
+        const numericValue = getNumberOrZero(datum[key]);
+        acc[key] = numericValue / total;
+        return acc;
+      }, normalizedDatum);
+    });
+
+    return normalizedDatum;
   };
 };
 
@@ -282,23 +299,26 @@ export const getNullReplacerTransform = (
     )
     .map(seriesModel => seriesModel.dataKey);
 
-  return getKeyBasedDatasetTransform(
-    replaceNullsWithZeroDataKeys,
-    (value: RowValue) => {
-      return value === null ? 0 : value;
-    },
-  );
+  return datum => {
+    const transformedDatum = { ...datum };
+    for (const key of replaceNullsWithZeroDataKeys) {
+      transformedDatum[key] = datum[key] != null ? datum[key] : 0;
+    }
+    return transformedDatum;
+  };
 };
 
-const hasInterpolatedSeries = (
+const hasInterpolatedAreaSeries = (
   seriesModels: SeriesModel[],
   settings: ComputedVisualizationSettings,
 ) => {
   return seriesModels.some(seriesModel => {
+    const seriesSettings = settings.series(
+      seriesModel.legacySeriesSettingsObjectKey,
+    );
     return (
-      settings.series(seriesModel.legacySeriesSettingsObjectKey)[
-        "line.missing"
-      ] !== "none"
+      seriesSettings["line.missing"] !== "none" &&
+      seriesSettings.display === "area"
     );
   });
 };
@@ -309,11 +329,13 @@ const hasInterpolatedSeries = (
  */
 const getStackedAreasInterpolateTransform = (
   seriesModels: SeriesModel[],
+  areaStackSeriesKeys: DataKey[],
 ): TransformFn => {
-  const seriesKeys = seriesModels.map(seriesModel => seriesModel.dataKey);
-
+  const areaStackSeriesKeysSet = new Set(areaStackSeriesKeys);
   return (datum: Datum) => {
-    const hasAtLeastOneSeriesValue = seriesKeys.some(key => datum[key] != null);
+    const hasAtLeastOneSeriesValue = areaStackSeriesKeys.some(
+      key => datum[key] != null,
+    );
     if (!hasAtLeastOneSeriesValue) {
       return datum;
     }
@@ -321,7 +343,9 @@ const getStackedAreasInterpolateTransform = (
     const transformedDatum = { ...datum };
     for (const seriesModel of seriesModels) {
       const dataKey = seriesModel.dataKey;
-      transformedDatum[dataKey] = datum[dataKey] == null ? 0 : datum[dataKey];
+      if (areaStackSeriesKeysSet.has(dataKey)) {
+        transformedDatum[dataKey] = datum[dataKey] == null ? 0 : datum[dataKey];
+      }
     }
     return transformedDatum;
   };
@@ -329,7 +353,7 @@ const getStackedAreasInterpolateTransform = (
 
 function getStackedValueTransformFunction(
   seriesDataKeys: DataKey[],
-  valueTransform: (value: number) => number,
+  valueTransform: (value: number) => number | null,
 ): TransformFn {
   return (datum: Datum) => {
     const transformedSeriesValues: Record<DataKey, number> = {};
@@ -344,25 +368,29 @@ function getStackedValueTransformFunction(
       const rawBelowTotal = belowSeriesKeys
         .map(belowSeriesKey => datum[belowSeriesKey])
         .reduce((total: number, rowValue) => {
-          const value = getNumberOrZero(rowValue);
-
-          if (sign === "+" && value >= 0) {
-            return total + value;
+          if (typeof rowValue !== "number") {
+            return total;
           }
-          if (sign === "-" && value < 0) {
-            return total + value;
+
+          if (sign === "+" && rowValue >= 0) {
+            return total + rowValue;
+          }
+          if (sign === "-" && rowValue < 0) {
+            return total + rowValue;
           }
           return total;
         }, 0);
       const rawTotal = rawBelowTotal + getNumberOrZero(datum[seriesDataKey]);
 
       // 2. Transform this total
-      const transformedTotal = valueTransform(rawTotal);
+      const transformedTotal = valueTransform(rawTotal) ?? 0;
 
       // 3. Subtract the transformed total of the already stacked values (not
       //    including the value we are currently stacking)
+      const transformedRawBelowTotal = valueTransform(rawBelowTotal) ?? 0;
+
       transformedSeriesValues[seriesDataKey] =
-        transformedTotal - valueTransform(rawBelowTotal);
+        transformedTotal - transformedRawBelowTotal;
     }
 
     seriesDataKeys.forEach(seriesDataKey => {
@@ -376,26 +404,23 @@ function getStackedValueTransformFunction(
   };
 }
 
-function getStackedValueTransfom(
+function getStackedValueTransform(
   settings: ComputedVisualizationSettings,
-  seriesDataKeys: DataKey[],
-): ConditionalTransform {
+  yAxisScaleTransforms: NumericAxisScaleTransforms,
+  stackModels: StackModel[],
+): ConditionalTransform[] {
   const isPow = settings["graph.y_axis.scale"] === "pow";
   const isLog = settings["graph.y_axis.scale"] === "log";
 
-  // In `getStackedValueTransformFunction`, each iteration of the loop ends with
-  // `transformedTotal - valueTransform(rawBelowTotal)`. However, in the first
-  // iteration `rawBelowTotal` will 0 because nothing is stacked yet, so to
-  // handle this case we want the `valueTransform` function to just return 0.
-  const logValueTransform = (value: number) =>
-    value === 0 ? value : signedLog(value);
+  const isNonLinearAxis = isPow || isLog;
 
-  const valueTransform = isPow ? signedSquareRoot : logValueTransform;
-
-  return {
-    condition: (isPow || isLog) && settings["stackable.stack_type"] != null,
-    fn: getStackedValueTransformFunction(seriesDataKeys, valueTransform),
-  };
+  return stackModels.map(stackModel => ({
+    condition: isNonLinearAxis,
+    fn: getStackedValueTransformFunction(
+      stackModel.seriesKeys,
+      yAxisScaleTransforms.toEChartsAxisValue,
+    ),
+  }));
 }
 
 function getStackedDataLabelTransform(
@@ -408,15 +433,69 @@ function getStackedDataLabelTransform(
       const transformedDatum = { ...datum };
 
       seriesDataKeys.forEach(seriesDataKey => {
-        if (getNumberOrZero(datum[seriesDataKey]) > 0) {
+        const value = datum[seriesDataKey];
+        if (typeof value !== "number") {
+          return;
+        }
+
+        if (value >= 0) {
           transformedDatum[POSITIVE_STACK_TOTAL_DATA_KEY] = Number.MIN_VALUE;
         }
-        if (getNumberOrZero(datum[seriesDataKey]) < 0) {
+        if (value < 0) {
           transformedDatum[NEGATIVE_STACK_TOTAL_DATA_KEY] = -Number.MIN_VALUE;
         }
       });
 
       return transformedDatum;
+    },
+  };
+}
+
+function getBarSeriesDataLabelTransform(
+  barSeriesModels: SeriesModel[],
+): ConditionalTransform {
+  return {
+    condition: barSeriesModels.length > 0,
+    fn: (datum: Datum) => {
+      const transforedDatum = { ...datum };
+
+      barSeriesModels.forEach(({ dataKey }) => {
+        const value = datum[dataKey];
+        if (typeof value !== "number") {
+          return;
+        }
+        if (value >= 0) {
+          transforedDatum[getBarSeriesDataLabelKey(dataKey, "+")] =
+            Number.MIN_VALUE;
+        }
+        if (value < 0) {
+          transforedDatum[getBarSeriesDataLabelKey(dataKey, "-")] =
+            -Number.MIN_VALUE;
+        }
+      });
+
+      return transforedDatum;
+    },
+  };
+}
+
+/**
+ * Replaces zero values with nulls for bar series so that we can use minHeight ECharts option
+ * to set minimum bar height for all non-zero values because it applies to bars with zero values too.
+ */
+function getBarSeriesZeroToNullTransform(
+  barSeriesModels: SeriesModel[],
+): ConditionalTransform {
+  return {
+    condition: barSeriesModels.length > 0,
+    fn: (datum: Datum) => {
+      const transforedDatum = { ...datum };
+
+      barSeriesModels.forEach(({ dataKey }) => {
+        transforedDatum[dataKey] = datum[dataKey] === 0 ? null : datum[dataKey];
+      });
+
+      return transforedDatum;
     },
   };
 }
@@ -444,6 +523,8 @@ export function filterNullDimensionValues(
 const Y_AXIS_CROSSING_ERROR = Error(
   t`Y-axis must not cross 0 when using log scale.`,
 );
+
+export const NO_X_AXIS_VALUES_ERROR_MESSAGE = t`There is no data to display. Check the query to ensure there are non-null x-axis values.`;
 
 export function replaceZeroesForLogScale(
   dataset: ChartDataset,
@@ -518,6 +599,106 @@ function getHistogramDataset(
   return dataset;
 }
 
+const MAX_FILL_COUNT = 10000;
+
+const interpolateTimeSeriesData = (
+  dataset: ChartDataset,
+  axisModel: TimeSeriesXAxisModel,
+): ChartDataset => {
+  if (axisModel.intervalsCount > MAX_FILL_COUNT) {
+    return dataset;
+  }
+
+  const { count, unit } = axisModel.interval;
+  const result = [];
+
+  for (let i = 0; i < dataset.length; i++) {
+    const datum = dataset[i];
+    result.push({
+      ...datum,
+      [ORIGINAL_INDEX_DATA_KEY]: datum[ORIGINAL_INDEX_DATA_KEY] ?? i,
+    });
+
+    if (i === dataset.length - 1) {
+      break;
+    }
+
+    const end = parseTimestamp(dataset[i + 1][X_AXIS_DATA_KEY]);
+
+    let start = parseTimestamp(datum[X_AXIS_DATA_KEY]);
+    while (start.add(count, unit).isBefore(end, unit)) {
+      const interpolatedValue = start.add(count, unit);
+      result.push({
+        [X_AXIS_DATA_KEY]: interpolatedValue.toISOString(),
+      });
+
+      start = interpolatedValue;
+    }
+  }
+
+  return result;
+};
+
+export function scaleDataset(
+  dataset: ChartDataset,
+  seriesModels: SeriesModel[],
+  settings: ComputedVisualizationSettings,
+): ChartDataset {
+  const scalingByDataKey: Record<DataKey, number> = {};
+  for (const seriesModel of seriesModels) {
+    scalingByDataKey[seriesModel.dataKey] = getColumnScaling(
+      seriesModel.column,
+      settings,
+    );
+  }
+
+  const transformFn = (datum: Datum) => {
+    const transformedRecord = { ...datum };
+    for (const seriesModel of seriesModels) {
+      const scale = scalingByDataKey[seriesModel.dataKey];
+
+      const key = seriesModel.dataKey;
+      if (key in datum) {
+        const scaledValue = Number.isFinite(datum[key])
+          ? (datum[key] as number) * scale
+          : null;
+        transformedRecord[key] = scaledValue;
+      }
+    }
+    return transformedRecord;
+  };
+
+  return dataset.map(datum => {
+    return transformFn(datum);
+  });
+}
+
+const getYAxisScaleTransforms = (
+  seriesModels: SeriesModel[],
+  stackModels: StackModel[],
+  yAxisScaleTransforms: NumericAxisScaleTransforms,
+  settings: ComputedVisualizationSettings,
+) => {
+  const stackedSeriesKeys = new Set(
+    stackModels.flatMap(stackModel => stackModel.seriesKeys),
+  );
+  const nonStackedSeriesKeys = seriesModels
+    .filter(seriesModel => !stackedSeriesKeys.has(seriesModel.dataKey))
+    .map(seriesModel => seriesModel.dataKey);
+
+  const nonStackedTransform = getKeyBasedDatasetTransform(
+    nonStackedSeriesKeys,
+    value => yAxisScaleTransforms.toEChartsAxisValue(value),
+  );
+  const stackedTransforms = getStackedValueTransform(
+    settings,
+    yAxisScaleTransforms,
+    stackModels,
+  );
+
+  return [nonStackedTransform, ...stackedTransforms];
+};
+
 /**
  * Modifies the dataset for visualization according to the specified visualization settings.
  *
@@ -530,40 +711,56 @@ function getHistogramDataset(
  */
 export const applyVisualizationSettingsDataTransformations = (
   dataset: ChartDataset,
+  stackModels: StackModel[],
   xAxisModel: XAxisModel,
   seriesModels: SeriesModel[],
   yAxisScaleTransforms: NumericAxisScaleTransforms,
   settings: ComputedVisualizationSettings,
   showWarning?: ShowWarning,
 ) => {
+  const barSeriesModels = seriesModels.filter(seriesModel => {
+    const seriesSettings = settings.series(
+      seriesModel.legacySeriesSettingsObjectKey,
+    );
+    return seriesSettings.display === "bar";
+  });
   const seriesDataKeys = seriesModels.map(seriesModel => seriesModel.dataKey);
 
   if (
-    xAxisModel.axisType === "value" ||
-    xAxisModel.axisType === "time" ||
+    isNumericAxis(xAxisModel) ||
+    isTimeSeriesAxis(xAxisModel) ||
     xAxisModel.isHistogram
   ) {
     dataset = filterNullDimensionValues(dataset, showWarning);
+    if (dataset.length === 0) {
+      throw new Error(NO_X_AXIS_VALUES_ERROR_MESSAGE);
+    }
   }
 
   if (settings["graph.y_axis.scale"] === "log") {
     dataset = replaceZeroesForLogScale(dataset, seriesDataKeys);
   }
 
-  if (xAxisModel.axisType === "category" && xAxisModel.isHistogram) {
+  if (isCategoryAxis(xAxisModel) && xAxisModel.isHistogram) {
     dataset = getHistogramDataset(dataset, xAxisModel.histogramInterval);
+  }
+
+  if (isTimeSeriesAxis(xAxisModel)) {
+    dataset = interpolateTimeSeriesData(dataset, xAxisModel);
   }
 
   return transformDataset(dataset, [
     getNullReplacerTransform(settings, seriesModels),
     {
       condition: settings["stackable.stack_type"] === "normalized",
-      fn: getNormalizedDatasetTransform(seriesDataKeys),
+      fn: getNormalizedDatasetTransform(stackModels),
     },
-    getKeyBasedDatasetTransform(seriesDataKeys, value =>
-      yAxisScaleTransforms.toEChartsAxisValue(value),
+    ...getYAxisScaleTransforms(
+      seriesModels,
+      stackModels,
+      yAxisScaleTransforms,
+      settings,
     ),
-    getStackedValueTransfom(settings, seriesDataKeys),
     {
       condition: isCategoryAxis(xAxisModel),
       fn: getKeyBasedDatasetTransform([X_AXIS_DATA_KEY], value => {
@@ -581,13 +778,18 @@ export const applyVisualizationSettingsDataTransformations = (
       }),
     },
     getStackedDataLabelTransform(settings, seriesDataKeys),
+    getBarSeriesDataLabelTransform(barSeriesModels),
     {
       condition:
         settings["stackable.stack_type"] != null &&
-        settings["stackable.stack_display"] === "area" &&
-        hasInterpolatedSeries(seriesModels, settings),
-      fn: getStackedAreasInterpolateTransform(seriesModels),
+        hasInterpolatedAreaSeries(seriesModels, settings),
+      fn: getStackedAreasInterpolateTransform(
+        seriesModels,
+        stackModels.find(stackModel => stackModel.display === "area")
+          ?.seriesKeys ?? [],
+      ),
     },
+    getBarSeriesZeroToNullTransform(barSeriesModels),
   ]);
 };
 
@@ -787,29 +989,4 @@ export const getCardsColumnByDataKeyMap = (
 
     return { ...acc, ...cardColumnByDataKeyMap };
   }, {} as Record<DataKey, DatasetColumn>);
-};
-
-export const getBubbleSizeDomain = (
-  seriesModels: SeriesModel[],
-  dataset: ChartDataset,
-): Extent | null => {
-  const bubbleSizeDataKeys = seriesModels
-    .map(seriesModel =>
-      "bubbleSizeDataKey" in seriesModel &&
-      seriesModel.bubbleSizeDataKey != null
-        ? seriesModel.bubbleSizeDataKey
-        : null,
-    )
-    .filter(isNotNull);
-
-  if (bubbleSizeDataKeys.length === 0) {
-    return null;
-  }
-
-  const bubbleSizeMaxValues = getObjectValues(
-    getDatasetExtents(bubbleSizeDataKeys, dataset),
-  ).map(extent => extent[1]);
-  const bubbleSizeDomainMax = Math.max(...bubbleSizeMaxValues);
-
-  return [0, bubbleSizeDomainMax];
 };

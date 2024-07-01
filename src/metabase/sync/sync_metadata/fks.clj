@@ -2,8 +2,7 @@
   "Logic for updating FK properties of Fields from metadata fetched from a physical DB."
   (:require
    [honey.sql :as sql]
-   [metabase.db.connection :as mdb.connection]
-   [metabase.driver :as driver]
+   [metabase.db :as mdb]
    [metabase.driver.util :as driver.u]
    [metabase.models.table :as table]
    [metabase.sync.fetch-metadata :as fetch-metadata]
@@ -42,7 +41,7 @@
                                    [:= :t.visibility_type nil]]})
         fk-field-id-query (field-id-query db-id fk-table-schema fk-table-name fk-column-name)
         pk-field-id-query (field-id-query db-id pk-table-schema pk-table-name pk-column-name)
-        q (case (mdb.connection/db-type)
+        q (case (mdb/db-type)
             :mysql
             {:update [:metabase_field :f]
              :join   [[fk-field-id-query :fk] [:= :fk.id :f.id]
@@ -76,7 +75,7 @@
                       [:or
                        [:= :f.fk_target_field_id nil]
                        [:not= :f.fk_target_field_id pk-field-id-query]]]})]
-    (sql/format q :dialect (mdb.connection/quoting-style (mdb.connection/db-type)))))
+    (sql/format q :dialect (mdb/quoting-style (mdb/db-type)))))
 
 (mu/defn ^:private mark-fk!
   "Updates the `fk_target_field_id` of a Field. Returns 1 if the Field was successfully updated, 0 otherwise."
@@ -100,7 +99,7 @@
   ([database :- i/DatabaseInstance
     table    :- i/TableInstance]
    (sync-util/with-error-handling (format "Error syncing FKs for %s" (sync-util/name-for-logging table))
-     (let [schema-names (when (driver/database-supports? (driver.u/database->driver database) :schemas database)
+     (let [schema-names (when (driver.u/supports? (driver.u/database->driver database) :schemas database)
                           [(:schema table)])
            fk-metadata  (into [] (fetch-metadata/fk-metadata database :schema-names schema-names :table-names [(:name table)]))]
        {:total-fks   (count fk-metadata)
@@ -116,7 +115,7 @@
   [database :- i/DatabaseInstance]
   (u/prog1 (sync-util/with-error-handling (format "Error syncing FKs for %s" (sync-util/name-for-logging database))
              (let [driver       (driver.u/database->driver database)
-                   schema-names (when (driver/database-supports? driver :schemas database)
+                   schema-names (when (driver.u/supports? driver :schemas database)
                                   (sync-util/db->sync-schemas database))
                    fk-metadata  (fetch-metadata/fk-metadata database :schema-names schema-names)]
                (transduce (map (fn [x]

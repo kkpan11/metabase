@@ -11,7 +11,7 @@
    [dk.ative.docjure.spreadsheet :as spreadsheet]
    [metabase.api.card-test :as api.card-test]
    [metabase.api.dashboard-test :as api.dashboard-test]
-   [metabase.api.embed :as api.embed]
+   [metabase.api.embed.common :as api.embed.common]
    [metabase.api.pivots :as api.pivots]
    [metabase.api.public-test :as public-test]
    [metabase.config :as config]
@@ -722,7 +722,9 @@
 
 ;;; ---------------------- GET /api/embed/dashboard/:token/dashcard/:dashcard-id/card/:card-id -----------------------
 
-(defn- dashcard-url [dashcard & [additional-token-params]]
+(defn dashcard-url
+  "The URL for a request to execute a query for a Card on an embedded Dashboard."
+  [dashcard & [additional-token-params]]
   (str "embed/dashboard/" (dash-token (:dashboard_id dashcard) additional-token-params)
        "/dashcard/" (u/the-id dashcard)
        "/card/" (:card_id dashcard)))
@@ -940,7 +942,7 @@
   (testing (str "parameters that are not in the `embedding-params` map at all should get removed by "
                 "`remove-locked-and-disabled-params`")
     (is (= {:parameters []}
-           (#'api.embed/remove-locked-and-disabled-params {:parameters {:slug "foo"}} {})))))
+           (#'api.embed.common/remove-locked-and-disabled-params {:parameters {:slug "foo"}} {})))))
 
 
 (deftest make-sure-that-multiline-series-word-as-expected---4768-
@@ -1052,13 +1054,13 @@
                      response))))
           (testing "card based param"
             (let [response (dropdown card (:card param-keys))]
-              (is (= {:values          [["Brite Spot Family Restaurant"] ["Red Medicine"]
-                                        ["Stout Burgers & Beers"] ["The Apple Pan"] ["Wurstküche"]]
+              (is (= {:values          [["20th Century Cafe"] ["25°"] ["33 Taps"]
+                                        ["800 Degrees Neapolitan Pizzeria"] ["BCD Tofu House"]]
                       :has_more_values false}
                      response)))
             (let [response (search card (:card param-keys) "red")]
               (is (= {:has_more_values false,
-                      :values          [["Red Medicine"]]}
+                      :values          [["Fred 62"] ["Red Medicine"]]}
                      response)))))))))
 
 ;;; ----------------------------- GET /api/embed/dashboard/:token/field/:field/values nil -----------------------------
@@ -1335,7 +1337,7 @@
   (with-chain-filter-fixtures [{:keys [dashboard values-url search-url]}]
     (testing "Requests should fail if searched param is locked"
       (t2/update! Dashboard (:id dashboard)
-        {:embedding_params {"category_id" "locked", "category_name" "locked"}})
+                  {:embedding_params {"category_id" "locked", "category_name" "locked"}})
       (doseq [url [(values-url) (search-url)]]
         (testing (str "\n" url)
           (is (re= #"Cannot search for values: \"category_(?:(?:name)|(?:id))\" is not an enabled parameter."
@@ -1343,7 +1345,7 @@
 
     (testing "Search param enabled\n"
       (t2/update! Dashboard (:id dashboard)
-        {:embedding_params {"category_id" "enabled", "category_name" "enabled", "price" "locked"}})
+                  {:embedding_params {"category_id" "enabled", "category_name" "enabled", "price" "locked"}})
 
       (testing "Requests should fail if the token is missing a locked parameter"
         (doseq [url [(values-url) (search-url)]]
@@ -1567,18 +1569,18 @@
 
 (deftest apply-slug->value-test
   (testing "For operator filter types treat a lone value as a one-value sequence (#20438)"
-    (is (= (#'api.embed/apply-slug->value [{:type    :string/=
-                                            :target  [:dimension [:template-tag "NAME"]]
-                                            :name    "Name"
-                                            :slug    "NAME"
-                                            :default nil}]
-                                          {:NAME ["Aaron Hand"]})
-           (#'api.embed/apply-slug->value [{:type    :string/=
-                                            :target  [:dimension [:template-tag "NAME"]]
-                                            :name    "Name"
-                                            :slug    "NAME"
-                                            :default nil}]
-                                          {:NAME "Aaron Hand"})))))
+    (is (= (#'api.embed.common/apply-slug->value [{:type    :string/=
+                                                   :target  [:dimension [:template-tag "NAME"]]
+                                                   :name    "Name"
+                                                   :slug    "NAME"
+                                                   :default nil}]
+                                                 {:NAME ["Aaron Hand"]})
+           (#'api.embed.common/apply-slug->value [{:type    :string/=
+                                                   :target  [:dimension [:template-tag "NAME"]]
+                                                   :name    "Name"
+                                                   :slug    "NAME"
+                                                   :default nil}]
+                                                 {:NAME "Aaron Hand"})))))
 
 (deftest handle-single-params-for-operator-filters-test
   (testing "Query endpoints should work with a single URL parameter for an operator filter (#20438)"

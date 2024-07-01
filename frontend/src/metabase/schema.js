@@ -46,6 +46,10 @@ export const TableSchema = new schema.Entity(
         };
       }
 
+      if (table.fields != null && table.original_fields == null) {
+        table.original_fields = table.fields;
+      }
+
       return table;
     },
   },
@@ -65,7 +69,6 @@ export const FieldSchema = new schema.Entity("fields", undefined, {
 });
 
 export const SegmentSchema = new schema.Entity("segments");
-export const MetricSchema = new schema.Entity("metrics");
 export const PersistedModelSchema = new schema.Entity("persistedModels");
 export const SnippetSchema = new schema.Entity("snippets");
 export const SnippetCollectionSchema = new schema.Entity("snippetCollections");
@@ -87,8 +90,8 @@ TableSchema.define({
   db: DatabaseSchema,
   fields: [FieldSchema],
   fks: [{ origin: FieldSchema, destination: FieldSchema }],
+  metrics: [QuestionSchema],
   segments: [SegmentSchema],
-  metrics: [MetricSchema],
   schema: SchemaSchema,
 });
 
@@ -102,10 +105,6 @@ FieldSchema.define({
 });
 
 SegmentSchema.define({
-  table: TableSchema,
-});
-
-MetricSchema.define({
   table: TableSchema,
 });
 
@@ -127,7 +126,6 @@ export const ENTITIES_SCHEMA_MAP = {
   pulses: PulseSchema,
   collections: CollectionSchema,
   segments: SegmentSchema,
-  metrics: MetricSchema,
   snippets: SnippetSchema,
   snippetCollections: SnippetCollectionSchema,
 };

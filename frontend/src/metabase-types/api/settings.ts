@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import type { InputSettingType } from "./actions";
+import type { DashboardId } from "./dashboard";
 import type { UserId } from "./user";
 
 export interface FormattingSettings {
@@ -56,7 +57,8 @@ export type EngineFieldType =
   | "select"
   | "textFile"
   | "info"
-  | "section";
+  | "section"
+  | "hidden";
 
 export type EngineFieldTreatType = "base64";
 
@@ -226,6 +228,7 @@ export const tokenFeatures = [
   "collection_cleanup",
   "query_reference_validation",
   "cache_preemptive",
+  "database_routing",
 ] as const;
 
 export type TokenFeature = (typeof tokenFeatures)[number];
@@ -360,7 +363,7 @@ interface PublicSettings {
   "cloud-gateway-ips": string[] | null;
   "custom-formatting": FormattingSettings;
   "custom-homepage": boolean;
-  "custom-homepage-dashboard": number | null;
+  "custom-homepage-dashboard": DashboardId | null;
   "ee-ai-features-enabled"?: boolean;
   "email-configured?": boolean;
   "embedding-app-origin": string | null;

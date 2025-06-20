@@ -22,6 +22,7 @@ const userOptions = {
   SHOW_BACKEND_LOGS: false,
   GENERATE_SNAPSHOTS: true,
   QUIET: false,
+  TZ: "UTC",
   ...booleanify(process.env),
 };
 
@@ -61,6 +62,7 @@ printBold(`Running Cypress with options:
   - START_BACKEND      : ${options.START_BACKEND}
   - OPEN_UI            : ${options.OPEN_UI}
   - SHOW_BACKEND_LOGS  : ${options.SHOW_BACKEND_LOGS}
+  - TZ                 : ${options.TZ}
 `);
 
 const init = async () => {
@@ -126,6 +128,7 @@ const init = async () => {
     case "vite-6-host-app-e2e":
     case "next-15-app-router-host-app-e2e":
     case "next-15-pages-router-host-app-e2e":
+    case "angular-20-host-app-e2e":
       await startHostAppContainers(options.TEST_SUITE);
       break;
   }

@@ -101,6 +101,7 @@ export const createMockTokenFeatures = (
   audit_app: false,
   cache_granular_controls: false,
   disable_password_login: false,
+  content_translation: false,
   content_verification: false,
   embedding: false,
   embedding_sdk: false,
@@ -121,14 +122,14 @@ export const createMockTokenFeatures = (
   email_restrict_recipients: false,
   collection_cleanup: false,
   upload_management: false,
-  query_reference_validation: false,
   serialization: false,
   cache_preemptive: false,
   metabot_v3: false,
+  ai_entity_analysis: false,
   ai_sql_fixer: false,
   ai_sql_generation: false,
   database_routing: false,
-  "development-mode": false,
+  development_mode: false,
   ...opts,
 });
 
@@ -164,7 +165,6 @@ export const createMockSettings = (
     ["es", "Spanish"],
     ["ko", "Korean"],
     ["pt_BR", "Portuguese (Brazil)"],
-    ["zh", "Chinese"],
     ["zh_CN", "Chinese (China)"],
     ["zh_HK", "Chinese (Hong Kong SAR China)"],
     ["zh_TW", "Chinese (Taiwan)"],
@@ -237,6 +237,13 @@ export const createMockSettings = (
   "example-dashboard-id": 1,
   gsheets: {},
   "humanization-strategy": "simple",
+  /**
+   * This is a derived setting and it reads either from an env, or from the list
+   * of databases. It checks whether there is a db with `is_sample` property.
+   * You probably don't want to set this directly in tests because it can get out
+   * of sync with the database state (whch should be a source of truth).
+   */
+  "has-sample-database?": undefined,
   "has-user-setup": true,
   "hide-embed-branding?": true,
   "instance-creation": dayjs().toISOString(),
@@ -249,6 +256,13 @@ export const createMockSettings = (
   "is-hosted?": false,
   "jwt-enabled": false,
   "jwt-configured": false,
+  "jwt-user-provisioning-enabled?": false,
+  "jwt-identity-provider-uri": null,
+  "jwt-shared-secret": null,
+  "jwt-attribute-email": null,
+  "jwt-attribute-firstname": null,
+  "jwt-attribute-lastname": null,
+  "jwt-group-sync": false,
   "ldap-configured?": false,
   "ldap-enabled": false,
   "ldap-port": 389, // default value from API
@@ -286,6 +300,19 @@ export const createMockSettings = (
   "saml-configured": false,
   "saml-enabled": false,
   "saml-identity-provider-uri": null,
+  "saml-application-name": null,
+  "saml-user-provisioning-enabled?": false,
+  "saml-attribute-email": null,
+  "saml-attribute-firstname": null,
+  "saml-attribute-lastname": null,
+  "saml-identity-provider-issuer": null,
+  "saml-identity-provider-certificate": null,
+  "saml-keystore-password": null,
+  "saml-keystore-alias": null,
+  "saml-keystore-path": null,
+  "saml-attribute-group": null,
+  "saml-group-sync": null,
+  "saml-group-mappings": null,
   "scim-enabled": false,
   "scim-base-url": "http://localhost:3000/api/ee/scim/v2/",
   "snowplow-url": "",
@@ -336,5 +363,6 @@ export const createMockSettings = (
   "check-for-updates": true,
   "update-channel": "latest",
   "trial-banner-dismissal-timestamp": null,
+  "license-token-missing-banner-dismissal-timestamp": [],
   ...opts,
 });

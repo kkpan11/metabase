@@ -135,7 +135,7 @@
           x
           [:field
            (options :guard (every-pred map? (complement (every-pred :base-type :effective-type))))
-           (id :guard integer? pos?)]
+           (id :guard pos-int?)]
           (if (some #{:mbql/stage-metadata} &parents)
             &match
             (update &match 1 merge
@@ -440,6 +440,11 @@
       (dissoc a-query :lib/metadata)
       lib.cache/discard-query-cache))
 
+(defn- get-native-stages [native-stage]
+  (for [{:keys [card-id] tag-type :type} (-> native-stage :template-tags vals)
+        :when (= tag-type :card)]
+    {:source-card card-id}))
+
 (defn- stage-seq* [query-fragment]
   (cond
     (vector? query-fragment)
@@ -450,7 +455,9 @@
       (mapcat stage-seq* query-fragment))
 
     (map? query-fragment)
-    (concat (:stages query-fragment) (mapcat stage-seq* (vals query-fragment)))
+    (if (= (:lib/type query-fragment) :mbql.stage/native)
+      (get-native-stages query-fragment)
+      (concat (:stages query-fragment) (mapcat stage-seq* (vals query-fragment))))
 
     :else
     []))
